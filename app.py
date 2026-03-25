@@ -53,10 +53,8 @@ with tab3:
         if selected:
             meeting = load_meeting(selected["path"])
             st.markdown(f"**Date:** {meeting['date']}")
-
             with st.expander("📝 Full Transcript", expanded=False):
                 st.text_area("Transcript", meeting.get("transcript", ""), height=300, disabled=True)
-
             if meeting.get("summary"):
                 st.markdown("### 📋 Summary")
                 st.markdown(meeting["summary"])
