@@ -1,0 +1,4 @@
+streamlit>=1.33
+openai>=1.0
+pydub>=0.25
+python-dotenv>=1.0
