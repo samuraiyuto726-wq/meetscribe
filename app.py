@@ -16,6 +16,30 @@ st.set_page_config(
 st.title("🎙️ MeetScribe")
 st.caption("Record or upload meeting audio → Get transcripts, summaries & action items")
 
+with st.sidebar:
+    st.header("⚙️ Settings")
+    api_key = st.text_input(
+        "OpenAI API Key",
+        type="password",
+        placeholder="sk-...",
+        help="Get your API key from platform.openai.com/api-keys"
+    )
+    if api_key:
+        os.environ["OPENAI_API_KEY"] = api_key
+        st.success("API key set!")
+
+    existing_key = os.getenv("OPENAI_API_KEY")
+    if not existing_key:
+        try:
+            existing_key = st.secrets.get("OPENAI_API_KEY")
+            if existing_key:
+                os.environ["OPENAI_API_KEY"] = existing_key
+        except Exception:
+            pass
+
+    if not os.getenv("OPENAI_API_KEY"):
+        st.warning("Please enter your OpenAI API key to use the app.")
+
 if "consent_given" not in st.session_state:
     st.session_state.consent_given = False
 
