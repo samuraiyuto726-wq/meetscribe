@@ -28,18 +28,18 @@ TRANSCRIPT:
 
 
 def generate_summary(transcript):
-      if not transcript or len(transcript.strip()) < 50:
-                return "Transcript too short to generate a meaningful summary."
-            try:
-                      response = client.chat.completions.create(
-                                    model="gpt-4o-mini",
-                                    temperature=0.3,
-                                    messages=[
-                                                      {"role": "system", "content": "You are a precise meeting summarizer."},
-                                                      {"role": "user", "content": SUMMARY_PROMPT.format(transcript=transcript)}
-                                    ],
-                                    max_tokens=2000,
-                      )
-                      return response.choices[0].message.content
-except Exception as e:
+    if not transcript or len(transcript.strip()) < 50:
+        return "Transcript too short to generate a meaningful summary."
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            temperature=0.3,
+            messages=[
+                {"role": "system", "content": "You are a precise meeting summarizer."},
+                {"role": "user", "content": SUMMARY_PROMPT.format(transcript=transcript)}
+            ],
+            max_tokens=2000,
+        )
+        return response.choices[0].message.content
+    except Exception as e:
         return f"Summary generation failed: {e}"
