@@ -1,8 +1,11 @@
 """
-Configuration for the copy-trading bot.
+Configuration for the Polymarket copy-trading bot.
 
-All settings are driven by environment variables so you can swap between
-mock/testnet/live without touching code.  See .env.example for reference.
+All secrets come from environment variables.  Copy .env.example → .env
+and fill in your values.  Never commit .env to version control.
+
+Polymarket uses USDC on Polygon (chain ID 137).
+Your wallet private key is required for signing orders.
 """
 import os
 from dataclasses import dataclass
@@ -12,48 +15,75 @@ from typing import Optional
 @dataclass
 class Config:
     # ------------------------------------------------------------------ #
-    # API endpoints – replace with real exchange URLs when ready          #
+    # Polymarket API endpoints (public – no auth needed for reads)        #
     # ------------------------------------------------------------------ #
     leaderboard_url: str = os.getenv(
-        "LEADERBOARD_URL", "https://mock.api/leaderboard"
+        "LEADERBOARD_URL",
+        "https://data-api.polymarket.com/leaderboard",
     )
-    trade_feed_url: str = os.getenv(
-        "TRADE_FEED_URL", "wss://mock.api/trades"
+    activity_url: str = os.getenv(
+        "ACTIVITY_URL",
+        "https://data-api.polymarket.com/activity",
+    )
+    clob_host: str = os.getenv(
+        "CLOB_HOST",
+        "https://clob.polymarket.com",
     )
 
     # ------------------------------------------------------------------ #
-    # Authentication – never hard-code; always use env vars              #
+    # Wallet / auth (required for live trading)                          #
     # ------------------------------------------------------------------ #
-    api_key: Optional[str] = os.getenv("API_KEY")
-    api_secret: Optional[str] = os.getenv("API_SECRET")
+    # Your Polygon wallet private key – NEVER commit this
+    private_key: Optional[str] = os.getenv("PRIVATE_KEY")
+
+    # Polygon chain ID: 137 = mainnet, 80002 = Amoy testnet
+    chain_id: int = int(os.getenv("CHAIN_ID", "137"))
+
+    # Polymarket proxy wallet address (auto-derived if left empty)
+    proxy_wallet: Optional[str] = os.getenv("PROXY_WALLET")
 
     # ------------------------------------------------------------------ #
     # Strategy                                                            #
     # ------------------------------------------------------------------ #
-    # Fixed USD amount to risk per mirrored trade (paper default: $1)
+    # Fixed USDC amount to spend per mirrored trade
     copy_amount_usd: float = float(os.getenv("COPY_AMOUNT_USD", "1.0"))
 
-    # If set, skip leaderboard lookup and target this username directly
-    target_username: Optional[str] = os.getenv("TARGET_USERNAME")
+    # Leaderboard window: "1d" | "1w" | "1m" | "all"
+    leaderboard_window: str = os.getenv("LEADERBOARD_WINDOW", "1m")
+
+    # Override: skip leaderboard and always mirror this proxy wallet address
+    target_wallet: Optional[str] = os.getenv("TARGET_WALLET")
+
+    # ------------------------------------------------------------------ #
+    # Polling                                                             #
+    # ------------------------------------------------------------------ #
+    # How often (seconds) to check the target's activity for new trades
+    poll_interval_seconds: float = float(os.getenv("POLL_INTERVAL_SECONDS", "15"))
+
+    # How many recent activity records to fetch per poll
+    activity_limit: int = int(os.getenv("ACTIVITY_LIMIT", "20"))
 
     # ------------------------------------------------------------------ #
     # Safeguards                                                          #
     # ------------------------------------------------------------------ #
-    max_signals_per_minute: int = int(os.getenv("MAX_SIGNALS_PER_MINUTE", "5"))
-    max_signals_per_hour: int = int(os.getenv("MAX_SIGNALS_PER_HOUR", "20"))
+    max_signals_per_hour: int = int(os.getenv("MAX_SIGNALS_PER_HOUR", "10"))
+    max_signals_per_day: int = int(os.getenv("MAX_SIGNALS_PER_DAY", "30"))
 
-    # How long (seconds) to remember a trade_id for duplicate detection
+    # Ignore trades where implied probability is above this (too expensive)
+    max_price: float = float(os.getenv("MAX_PRICE", "0.95"))
+
+    # Ignore trades where implied probability is below this (too cheap / risky)
+    min_price: float = float(os.getenv("MIN_PRICE", "0.05"))
+
+    # How long (seconds) to remember a trade ID to prevent duplicates
     duplicate_window_seconds: int = int(
-        os.getenv("DUPLICATE_WINDOW_SECONDS", "120")
+        os.getenv("DUPLICATE_WINDOW_SECONDS", "3600")
     )
 
     # ------------------------------------------------------------------ #
     # Execution mode                                                      #
     # ------------------------------------------------------------------ #
-    # True  → use internal mock data (no network required)
-    use_mock: bool = os.getenv("USE_MOCK", "true").lower() == "true"
-
-    # True  → log orders but never call the exchange (safe default)
+    # True → simulate locally, never touch the CLOB
     dry_run: bool = os.getenv("DRY_RUN", "true").lower() == "true"
 
     # ------------------------------------------------------------------ #

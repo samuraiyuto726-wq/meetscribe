@@ -1,8 +1,9 @@
-# Core async HTTP client (used for leaderboard and real order placement)
+# Async HTTP – leaderboard + activity polling
 aiohttp>=3.9.0
 
-# WebSocket client (used for real trade feed; not needed in mock mode)
-websockets>=12.0
+# Polymarket official CLOB client (live trading only)
+# Handles wallet auth, order signing, and submission
+py-clob-client>=0.18.0
 
-# Optional: load .env file automatically
+# Load .env file automatically
 python-dotenv>=1.0.0

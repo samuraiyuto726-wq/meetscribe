@@ -1,11 +1,11 @@
 """
-Signal generator – watches the trade stream and emits copy-trade signals
-for the target trader, with three layers of safeguards:
+Signal generator – filters the Polymarket activity feed for the target
+wallet and emits copy-trade signals with safeguards:
 
-  1. Duplicate prevention – each trade_id is remembered for a configurable
-     window so a re-delivered event never produces two signals.
-  2. Per-minute rate limit – caps burst activity.
-  3. Per-hour rate limit  – caps sustained activity.
+  1. Duplicate prevention  – trade IDs are remembered to avoid re-firing
+  2. Price filter          – skip trades outside your configured price band
+  3. Per-hour rate limit   – caps how many signals fire in a rolling hour
+  4. Per-day  rate limit   – caps total daily exposure
 """
 import logging
 import time
@@ -20,95 +20,88 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Signal:
-    """A decision to mirror a specific trade with a fixed USD amount."""
+    """Decision to mirror a Polymarket trade with a fixed USDC amount."""
 
     trade: Trade
-    copy_amount_usd: float
+    copy_amount_usd: float      # USDC to spend
     generated_at: float = field(default_factory=time.time)
 
     def __str__(self) -> str:
         t = self.trade
         return (
-            f"SIGNAL | {t.side.upper()} {t.symbol} "
-            f"| ${self.copy_amount_usd:.2f} "
-            f"| source={t.username} price={t.price:.4f} "
+            f"SIGNAL | {t.side} {t.outcome} @ {t.price:.3f} "
+            f"| ${self.copy_amount_usd:.2f} USDC "
+            f"| market: \"{t.title[:60]}\" "
             f"| trade_id={t.trade_id}"
         )
 
 
 class SignalGenerator:
-    """
-    Filters the trade stream for the target trader and produces Signals.
-
-    Parameters
-    ----------
-    config       : Config instance
-    target_username : username / ID to mirror (from leaderboard or env)
-    """
-
-    def __init__(self, config, target_username: str) -> None:
+    def __init__(self, config, target_wallet: str) -> None:
         self.config = config
-        self.target_username = target_username
+        self.target_wallet = target_wallet.lower()
 
-        # Sliding-window rate limiters
-        self._per_minute = RateLimiter(
-            max_calls=config.max_signals_per_minute,
-            period_seconds=60,
-        )
         self._per_hour = RateLimiter(
             max_calls=config.max_signals_per_hour,
             period_seconds=3600,
         )
+        self._per_day = RateLimiter(
+            max_calls=config.max_signals_per_day,
+            period_seconds=86400,
+        )
 
-        # Duplicate store: trade_id → monotonic timestamp when first seen
+        # trade_id → monotonic time when first seen
         self._seen: dict[str, float] = {}
-
-    # ------------------------------------------------------------------ #
-    # Public API                                                          #
-    # ------------------------------------------------------------------ #
 
     def process(self, trade: Trade) -> Optional[Signal]:
         """
-        Evaluate a trade event.
-
-        Returns a Signal if the event should be mirrored, otherwise None.
-        All rejection reasons are logged at WARNING level.
+        Evaluate a Polymarket trade event.
+        Returns a Signal to mirror, or None with a logged reason.
         """
-        if trade.username != self.target_username:
-            return None  # not our trader – silent skip
+        # Filter: only care about the target wallet
+        if trade.proxy_wallet.lower() != self.target_wallet:
+            return None
 
         logger.info(
-            "Target trade detected: %s %s %s %s @ %.4f (id=%s)",
-            trade.username,
-            trade.side.upper(),
-            trade.size,
-            trade.symbol,
+            "Target trade detected | %s %s @ %.3f | $%.2f | \"%s\" | id=%s",
+            trade.side,
+            trade.outcome,
             trade.price,
+            trade.usd_size,
+            trade.title[:60],
             trade.trade_id,
         )
 
-        # Safeguard 1: duplicate prevention
+        # Safeguard 1: duplicate
         if self._is_duplicate(trade):
             logger.warning("Duplicate trade skipped: %s", trade.trade_id)
             return None
 
-        # Safeguard 2: per-minute cap
-        if not self._per_minute.is_allowed():
+        # Safeguard 2: price band – avoid near-certain or near-impossible outcomes
+        if not (self.config.min_price <= trade.price <= self.config.max_price):
             logger.warning(
-                "Per-minute rate limit hit. Signal dropped for trade_id=%s "
-                "(remaining this minute: 0 / %d)",
-                trade.trade_id,
-                self.config.max_signals_per_minute,
+                "Trade price %.3f outside band [%.2f, %.2f]. Skipped.",
+                trade.price,
+                self.config.min_price,
+                self.config.max_price,
             )
             return None
 
         # Safeguard 3: per-hour cap
         if not self._per_hour.is_allowed():
             logger.warning(
-                "Per-hour rate limit hit. Signal dropped for trade_id=%s "
-                "(limit: %d/hr)",
-                trade.trade_id,
+                "Per-hour rate limit hit (%d/hr). Signal dropped for %s.",
                 self.config.max_signals_per_hour,
+                trade.trade_id,
+            )
+            return None
+
+        # Safeguard 4: per-day cap
+        if not self._per_day.is_allowed():
+            logger.warning(
+                "Per-day rate limit hit (%d/day). Signal dropped for %s.",
+                self.config.max_signals_per_day,
+                trade.trade_id,
             )
             return None
 
@@ -116,10 +109,6 @@ class SignalGenerator:
         signal = Signal(trade=trade, copy_amount_usd=self.config.copy_amount_usd)
         logger.info("%s", signal)
         return signal
-
-    # ------------------------------------------------------------------ #
-    # Internal helpers                                                    #
-    # ------------------------------------------------------------------ #
 
     def _is_duplicate(self, trade: Trade) -> bool:
         self._evict_expired()

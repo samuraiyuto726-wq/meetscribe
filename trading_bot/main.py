@@ -1,11 +1,14 @@
 """
-Entry point for the copy-trading bot.
+Entry point for the Polymarket copy-trading bot.
 
-Run in simulation mode (default):
+Default (safe) run – simulation only, reads live Polymarket data:
     python -m trading_bot
 
-Override settings via env vars or a .env file:
-    USE_MOCK=false TRADE_FEED_URL=wss://... python -m trading_bot
+Simulation with a pinned wallet (skip leaderboard):
+    TARGET_WALLET=0x... python -m trading_bot
+
+Live trading (after you've read executor.py's risk checklist):
+    DRY_RUN=false PRIVATE_KEY=0x... python -m trading_bot
 """
 import asyncio
 import logging
@@ -37,59 +40,61 @@ def setup_logging(config: Config) -> None:
 
 async def run(config: Config) -> None:
     # ------------------------------------------------------------------ #
-    # 1. Identify target trader                                           #
+    # 1. Identify target trader from Polymarket leaderboard              #
     # ------------------------------------------------------------------ #
     fetcher = LeaderboardFetcher(config)
-    target = await fetcher.fetch_top_trader()
-    if not target:
+    target_wallet = await fetcher.fetch_top_trader()
+    if not target_wallet:
         logger.error("Could not identify a target trader. Exiting.")
         return
 
-    logger.info("Target trader: %s", target)
+    logger.info("Target wallet: %s", target_wallet)
 
     # ------------------------------------------------------------------ #
-    # 2. Initialise components                                            #
+    # 2. Wire up components                                               #
     # ------------------------------------------------------------------ #
     feed = TradeFeed(config)
-    generator = SignalGenerator(config, target_username=target)
+    generator = SignalGenerator(config, target_wallet=target_wallet)
     executor = TradeExecutor(config)
 
-    mode = "SIMULATION" if (config.dry_run or config.use_mock) else "LIVE"
+    mode = "DRY RUN (simulation)" if config.dry_run else "LIVE"
     logger.warning(
-        "Bot starting in %s mode | copy_amount=$%.2f | target=%s",
+        "Bot starting | mode=%s | copy=$%.2f USDC | target=%s | poll=%.0fs",
         mode,
         config.copy_amount_usd,
-        target,
+        target_wallet,
+        config.poll_interval_seconds,
     )
 
     # ------------------------------------------------------------------ #
-    # 3. Main loop                                                        #
+    # 3. Poll loop                                                        #
     # ------------------------------------------------------------------ #
     try:
-        async for trade in feed.stream():
+        async for trade in feed.stream(target_wallet):
             signal = generator.process(trade)
             if signal is None:
                 continue
 
             result = await executor.execute(signal)
+
             if result.success:
                 logger.info(
-                    "Order accepted | order_id=%s simulated=%s",
+                    "Order accepted | order_id=%s | shares=%.4f | simulated=%s",
                     result.order_id,
+                    result.shares_bought or 0,
                     result.is_simulated,
                 )
             else:
                 logger.error("Order failed: %s", result.error)
 
     except asyncio.CancelledError:
-        logger.info("Shutdown signal received. Stopping feed…")
+        logger.info("Shutdown signal received.")
     finally:
         feed.stop()
         logger.info("Bot stopped cleanly.")
 
 
 def main() -> None:
-    """Synchronous entry point; handles OS signals for graceful shutdown."""
     config = Config()
     setup_logging(config)
 
@@ -107,8 +112,7 @@ def main() -> None:
             try:
                 loop.add_signal_handler(sig, _shutdown)
             except NotImplementedError:
-                # Windows does not support add_signal_handler for all signals
-                pass
+                pass  # Windows
 
     try:
         main_task = loop.create_task(run(config))
