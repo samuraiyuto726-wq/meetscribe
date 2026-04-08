@@ -1,0 +1,8 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+
+# Bot runtime output
+trading_bot.log
