@@ -126,9 +126,9 @@ class TradeExecutor:
 
         try:
             from py_clob_client.clob_types import OrderArgs, OrderType
-            from py_clob_client.constants import BUY, SELL
 
-            side = BUY if t.side == "BUY" else SELL
+            # py-clob-client ≥0.19 removed BUY/SELL constants; use strings directly
+            side = "BUY" if t.side == "BUY" else "SELL"
 
             order_args = OrderArgs(
                 token_id=t.token_id,
@@ -182,11 +182,24 @@ class TradeExecutor:
                 "PRIVATE_KEY is not set. Add it to your .env file."
             )
 
-        client = ClobClient(
-            host=self.config.clob_host,
-            key=self.config.private_key,
-            chain_id=self.config.chain_id,
-        )
+        # If PROXY_WALLET is set, sign as the proxy (signature_type=2).
+        # This is needed when the funds live in a Polymarket proxy wallet
+        # (created automatically when you log in via MetaMask on polymarket.com).
+        if self.config.proxy_wallet:
+            client = ClobClient(
+                host=self.config.clob_host,
+                key=self.config.private_key,
+                chain_id=self.config.chain_id,
+                signature_type=2,
+                funder=self.config.proxy_wallet,
+            )
+            logger.info("Using proxy wallet signing (signature_type=2, funder=%s)", self.config.proxy_wallet)
+        else:
+            client = ClobClient(
+                host=self.config.clob_host,
+                key=self.config.private_key,
+                chain_id=self.config.chain_id,
+            )
 
         # Derive L2 API credentials from the wallet key (creates them if new)
         client.set_api_creds(client.create_or_derive_api_creds())

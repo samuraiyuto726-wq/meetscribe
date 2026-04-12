@@ -1,12 +1,3 @@
-"""
-trading_bot – copy-trade mirroring bot.
-
-Quick start (simulation mode, no config needed):
-    python -m trading_bot
-
-See trading_bot/config.py and .env.example for all settings.
-"""
-from .config import Config
-from .main import main, run
-
-__all__ = ["Config", "main", "run"]
+# trading_bot package
+# Imports are intentionally deferred so that __main__.py can call
+# load_dotenv() before any Config is instantiated.
