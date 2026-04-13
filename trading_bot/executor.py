@@ -34,6 +34,7 @@ HOW TO APPROVE USDC (one-time setup)
 """
 import json
 import logging
+import math
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -72,7 +73,7 @@ class TradeExecutor:
     def _simulate(self, signal: Signal) -> ExecutionResult:
         t = signal.trade
         # How many shares $1 buys at the current price
-        shares = round(signal.copy_amount_usd / t.price, 4) if t.price > 0 else 0
+        shares = math.ceil(signal.copy_amount_usd / t.price * 10000) / 10000 if t.price > 0 else 0
         order_id = f"sim_{int(time.time() * 1000)}"
 
         logger.info(
@@ -122,7 +123,8 @@ class TradeExecutor:
             )
 
         t = signal.trade
-        shares = round(signal.copy_amount_usd / t.price, 4)
+        # Round UP so cost is always >= copy_amount_usd (avoids min-size rejections)
+        shares = math.ceil(signal.copy_amount_usd / t.price * 10000) / 10000
 
         try:
             from py_clob_client.clob_types import OrderArgs, OrderType
