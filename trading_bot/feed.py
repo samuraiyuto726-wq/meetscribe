@@ -43,24 +43,22 @@ class TradeFeed:
         while self._running:
             self._check_count += 1
             now = datetime.now().strftime("%H:%M:%S")
-            print(f"[BOT] [{now}] Check #{self._check_count} — Checking Polymarket...", flush=True)
+            print(f"[{now}] Checking bets... (check #{self._check_count})", flush=True)
 
             try:
                 new_trades = await self._fetch_new_trades(wallet)
                 if new_trades:
-                    print(f"[BOT] Found {len(new_trades)} new trade(s) from top trader!", flush=True)
                     for trade in new_trades:
-                        print(f"[BOT] -------------------------------------------", flush=True)
-                        print(f"[BOT] *** NEW TRADE DETECTED ***", flush=True)
-                        print(f"[BOT]   Action  : {trade.side}", flush=True)
-                        print(f"[BOT]   Outcome : {trade.outcome}", flush=True)
-                        print(f"[BOT]   Price   : {trade.price:.3f} ({trade.price*100:.1f}% probability)", flush=True)
-                        print(f"[BOT]   Size    : ${trade.usd_size:.2f} USDC", flush=True)
-                        print(f"[BOT]   Market  : {trade.title[:70]}", flush=True)
-                        print(f"[BOT] -------------------------------------------", flush=True)
+                        print(f"\n  *** TOP TRADER PLACED A BET ***", flush=True)
+                        print(f"  Market  : {trade.title[:70]}", flush=True)
+                        print(f"  Bet on  : {trade.outcome}", flush=True)
+                        print(f"  Side    : {trade.side}", flush=True)
+                        print(f"  Price   : {trade.price*100:.1f}% probability", flush=True)
+                        print(f"  Amount  : ${trade.usd_size:.2f} USDC", flush=True)
+                        print(f"  Copying trade now...\n", flush=True)
                         yield trade
                 else:
-                    print(f"[BOT] No new trades. Waiting {self.config.poll_interval_seconds:.0f}s...\n", flush=True)
+                    print(f"  No new bets. Waiting {self.config.poll_interval_seconds:.0f}s...", flush=True)
 
             except Exception as exc:
                 print(f"[BOT] ERROR: {exc} — retrying next cycle\n", flush=True)

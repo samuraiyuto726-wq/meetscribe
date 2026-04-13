@@ -78,14 +78,10 @@ async def run(config: Config) -> None:
             result = await executor.execute(signal)
 
             if result.success:
-                logger.info(
-                    "Order accepted | order_id=%s | shares=%.4f | simulated=%s",
-                    result.order_id,
-                    result.shares_bought or 0,
-                    result.is_simulated,
-                )
+                label = "[SIM]" if result.is_simulated else "[LIVE]"
+                print(f"  {label} BET COPIED! ${signal.copy_amount_usd:.2f} on {signal.trade.outcome} | order_id={result.order_id}\n", flush=True)
             else:
-                logger.error("Order failed: %s", result.error)
+                print(f"  [ERROR] Could not copy bet: {result.error}\n", flush=True)
 
     except asyncio.CancelledError:
         logger.info("Shutdown signal received.")
