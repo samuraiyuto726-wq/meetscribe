@@ -39,7 +39,9 @@ from trading_bot.signal_generator import SignalGenerator
 from trading_bot.executor import TradeExecutor
 
 FALLBACK_WALLETS = [
-    "0x492442eab586f242b53bda933fd5de859c8a3782",
+    "0x492442eab586f242b53bda933fd5de859c8a3782",  # #1 monthly
+    "0x2a2c53bd278c04da9962fcf96490e17f3dfb9bc1",  # #6 monthly
+    "0x2005d16a84ceefa912d4e380cd32e7ff827875ea",  # #7 monthly (RN1)
 ]
 
 
