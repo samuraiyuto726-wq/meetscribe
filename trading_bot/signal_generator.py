@@ -59,7 +59,9 @@ class SignalGenerator:
         Returns a Signal to mirror, or None with a logged reason.
         """
         # Filter: only care about the target wallet
-        if trade.proxy_wallet.lower() != self.target_wallet:
+        # (skip check when proxyWallet is absent from the API response,
+        #  since the API was already queried with ?user=TARGET_WALLET)
+        if trade.proxy_wallet and trade.proxy_wallet.lower() != self.target_wallet:
             return None
 
         logger.info(
