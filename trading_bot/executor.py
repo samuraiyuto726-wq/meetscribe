@@ -73,7 +73,7 @@ class TradeExecutor:
     def _simulate(self, signal: Signal) -> ExecutionResult:
         t = signal.trade
         # How many shares $1 buys at the current price
-        shares = math.ceil(signal.copy_amount_usd / t.price * 10000) / 10000 if t.price > 0 else 0
+        shares = 5.0 if t.price > 0 else 0
         order_id = f"sim_{int(time.time() * 1000)}"
 
         logger.info(
@@ -123,8 +123,7 @@ class TradeExecutor:
             )
 
         t = signal.trade
-        # Round UP so cost is always >= copy_amount_usd (avoids min-size rejections)
-        shares = math.ceil(signal.copy_amount_usd / t.price * 10000) / 10000
+        shares = 5.0
 
         try:
             from py_clob_client.clob_types import OrderArgs, OrderType

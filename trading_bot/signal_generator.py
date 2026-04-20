@@ -53,6 +53,10 @@ class SignalGenerator:
         # trade_id → monotonic time when first seen
         self._seen: dict[str, float] = {}
 
+        # market title → number of times we've bet on it
+        self._market_counts: dict[str, int] = {}
+        self._max_bets_per_market = 5
+
     def process(self, trade: Trade) -> Optional[Signal]:
         """
         Evaluate a Polymarket trade event.
@@ -89,7 +93,17 @@ class SignalGenerator:
             )
             return None
 
-        # Safeguard 3: per-hour cap
+        # Safeguard 3: per-market cap
+        market_key = trade.title[:80].lower()
+        if self._market_counts.get(market_key, 0) >= self._max_bets_per_market:
+            logger.warning(
+                "Market bet limit (%d) reached for \"%s\". Skipped.",
+                self._max_bets_per_market,
+                trade.title[:60],
+            )
+            return None
+
+        # Safeguard 4: per-hour cap
         if not self._per_hour.is_allowed():
             logger.warning(
                 "Per-hour rate limit hit (%d/hr). Signal dropped for %s.",
@@ -98,7 +112,7 @@ class SignalGenerator:
             )
             return None
 
-        # Safeguard 4: per-day cap
+        # Safeguard 5: per-day cap
         if not self._per_day.is_allowed():
             logger.warning(
                 "Per-day rate limit hit (%d/day). Signal dropped for %s.",
@@ -107,6 +121,7 @@ class SignalGenerator:
             )
             return None
 
+        self._market_counts[market_key] = self._market_counts.get(market_key, 0) + 1
         self._record(trade)
         signal = Signal(trade=trade, copy_amount_usd=self.config.copy_amount_usd)
         logger.info("%s", signal)

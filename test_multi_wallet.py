@@ -1,6 +1,6 @@
 """
 Multi-wallet test: watch top-10 Polymarket monthly leaderboard traders,
-copy the FIRST trade any of them places, then stop.
+copy the first 2 trades any of them place, then stop.
 
 Run on Windows:
     py C:\Users\glmar\test_multi_wallet.py
@@ -10,16 +10,14 @@ import os
 import re
 import sys
 
-# Windows requires this event loop policy for aiohttp
 asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-# ── env vars ──────────────────────────────────────────────────────────────────
 os.environ['PROXY_WALLET']          = '0xa1823f3BacCEEF4e4358Af25D2686A03cEe930f5'
 os.environ['DRY_RUN']               = 'false'
 os.environ['CHAIN_ID']              = '137'
 os.environ['COPY_AMOUNT_USD']       = '1.0'
 os.environ['POLL_INTERVAL_SECONDS'] = '5'
-os.environ['MIN_PRICE']             = '0.01'   # wide band so we catch more trades
+os.environ['MIN_PRICE']             = '0.01'
 os.environ['MAX_PRICE']             = '0.99'
 os.environ['MAX_SIGNALS_PER_HOUR']  = '100'
 os.environ['MAX_SIGNALS_PER_DAY']   = '100'
@@ -39,32 +37,26 @@ from trading_bot.signal_generator import SignalGenerator
 from trading_bot.executor import TradeExecutor
 
 FALLBACK_WALLETS = [
-    "0x492442eab586f242b53bda933fd5de859c8a3782",  # #1 monthly
-    "0x2a2c53bd278c04da9962fcf96490e17f3dfb9bc1",  # #6 monthly
-    "0x2005d16a84ceefa912d4e380cd32e7ff827875ea",  # #7 monthly (RN1)
+    "0x492442eab586f242b53bda933fd5de859c8a3782",
+    "0x2a2c53bd278c04da9962fcf96490e17f3dfb9bc1",
+    "0x2005d16a84ceefa912d4e380cd32e7ff827875ea",
 ]
+
+TARGET_BETS = 2   # stop after this many successful bets
 
 
 async def fetch_top10() -> list:
-    """Scrape top-10 proxy wallets from the Polymarket monthly leaderboard."""
     url = "https://polymarket.com/leaderboard"
     hdrs = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0 Safari/537.36"
-        ),
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml",
         "Accept-Language": "en-US,en;q=0.9",
     }
     try:
         async with aiohttp.ClientSession() as sess:
-            async with sess.get(
-                url, headers=hdrs, timeout=aiohttp.ClientTimeout(total=20)
-            ) as resp:
+            async with sess.get(url, headers=hdrs, timeout=aiohttp.ClientTimeout(total=20)) as resp:
                 resp.raise_for_status()
                 html = await resp.text()
-
         raw = re.findall(r'"proxyWallet"\s*:\s*"(0x[a-fA-F0-9]{40,})"', html)
         seen, unique = set(), []
         for w in raw:
@@ -72,41 +64,32 @@ async def fetch_top10() -> list:
             if wl not in seen:
                 seen.add(wl)
                 unique.append(w)
-
         top10 = unique[:10]
         if top10:
             print(f"\n[LEADERBOARD] Top {len(top10)} monthly wallets found:")
             for i, w in enumerate(top10, 1):
                 print(f"  #{i}: {w}")
             return top10
-
     except Exception as exc:
         print(f"[LEADERBOARD] Scrape failed: {exc}")
-
     print("[LEADERBOARD] Using fallback wallet list.")
     return FALLBACK_WALLETS
 
 
-async def watch_one_wallet(wallet: str, config: Config, executor: TradeExecutor):
-    """
-    Poll a single wallet forever until a new trade is detected.
-    Execute it and return the ExecutionResult.
-    """
+async def watch_one_wallet(wallet, config, executor, result_queue, stop_event):
     feed = TradeFeed(config)
     gen  = SignalGenerator(config, target_wallet=wallet)
-
-    # stream() is an infinite async generator; we break out on first signal
     async for trade in feed.stream(wallet):
+        if stop_event.is_set():
+            feed.stop()
+            return
         signal = gen.process(trade)
         if signal is None:
             continue
-
         print(f"\n[HIT] New trade from wallet {wallet[:20]}...")
         result = await executor.execute(signal)
-        feed.stop()   # tell the generator to exit cleanly
-        return result
-
-    return None   # only reached if feed.stop() was called externally
+        await result_queue.put(result)
+        await asyncio.sleep(0)  # yield so main loop can set stop_event before next trade
 
 
 async def main():
@@ -114,48 +97,49 @@ async def main():
     wallets  = await fetch_top10()
     executor = TradeExecutor(config)
 
-    print(
-        f"\n[TEST] Polling {len(wallets)} wallets every "
-        f"{config.poll_interval_seconds:.0f}s"
-    )
-    print("[TEST] Will copy ONE trade from ANY of them, then stop.\n")
+    print(f"\n[TEST] Polling {len(wallets)} wallets every {config.poll_interval_seconds:.0f}s")
+    print(f"[TEST] Will copy {TARGET_BETS} trades then stop.\n")
+
+    result_queue = asyncio.Queue()
+    stop_event   = asyncio.Event()
 
     tasks = [
-        asyncio.create_task(watch_one_wallet(w, config, executor))
+        asyncio.create_task(watch_one_wallet(w, config, executor, result_queue, stop_event))
         for w in wallets
     ]
 
-    # Block until the first watcher task finishes (= first trade copied)
-    done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    successes = 0
+    bet_num   = 0
 
-    # Cancel every other watcher
-    for t in pending:
+    while successes < TARGET_BETS:
+        result  = await result_queue.get()
+        bet_num += 1
+        sig     = result.signal
+
+        print("\n" + "=" * 60)
+        if result.success:
+            successes += 1
+            label = "[SIM]" if result.is_simulated else "[LIVE]"
+            print(f"BET {successes}/{TARGET_BETS} COPIED!  {label}")
+            print(f"  Market  : {sig.trade.title[:70]}")
+            print(f"  Outcome : {sig.trade.outcome}")
+            print(f"  Price   : {sig.trade.price * 100:.1f}%")
+            print(f"  Shares  : 5")
+            print(f"  OrderID : {result.order_id}")
+            if successes >= TARGET_BETS:
+                stop_event.set()  # stop watchers immediately
+        else:
+            print(f"BET {bet_num} FAILED: {result.error}")
+        print("=" * 60)
+
+    # Done — stop all watchers
+    stop_event.set()
+    for t in tasks:
         t.cancel()
-    if pending:
-        await asyncio.gather(*pending, return_exceptions=True)
+    await asyncio.gather(*tasks, return_exceptions=True)
 
-    result = list(done)[0].result()
-
-    print("\n" + "=" * 60)
-    if result and result.success:
-        label = "[SIM]" if result.is_simulated else "[LIVE]"
-        sig   = result.signal
-        print(f"SUCCESS!  {label} BET COPIED!")
-        print(f"  Market  : {sig.trade.title[:70]}")
-        print(f"  Outcome : {sig.trade.outcome}")
-        print(f"  Price   : {sig.trade.price * 100:.1f}% probability")
-        print(f"  Amount  : ${sig.copy_amount_usd:.2f} USDC")
-        print(f"  OrderID : {result.order_id}")
-        print("=" * 60)
-        print("\nTest PASSED. Bot can detect and copy trades from leaderboard traders.")
-        print("\nNow go back to run_bot.py which tracks only:")
-        print("  0x492442eab586f242b53bda933fd5de859c8a3782")
-    elif result:
-        print(f"FAILED — trade detected but order failed: {result.error}")
-        print("=" * 60)
-    else:
-        print("No trade was detected before the script stopped.")
-        print("=" * 60)
+    print(f"\nTest PASSED. Bot successfully copied {TARGET_BETS} trades.")
+    print("Now go back to run_bot.py which tracks only 0x492442...")
 
 
 if __name__ == "__main__":

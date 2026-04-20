@@ -83,30 +83,31 @@ class TradeFeed:
         if not entries:
             return []
 
-        newest_id = str(entries[0].get("id", ""))
+        newest_id = str(entries[0].get("transactionHash", entries[0].get("id", "")))
         if self._last_seen_id is None:
             self._last_seen_id = newest_id
-            print(f"[BOT] Started tracking from trade_id={newest_id}", flush=True)
+            print(f"[BOT] Started tracking from tx={newest_id[:20]}...", flush=True)
             return []
 
         new_entries = []
         for e in entries:
-            if str(e.get("id", "")) == self._last_seen_id:
+            tx = str(e.get("transactionHash", e.get("id", "")))
+            if tx == self._last_seen_id:
                 break
             new_entries.append(e)
 
         if new_entries:
-            self._last_seen_id = str(new_entries[0].get("id", ""))
+            self._last_seen_id = str(new_entries[0].get("transactionHash", new_entries[0].get("id", "")))
 
         return [t for t in (self._parse(e) for e in new_entries) if t]
 
     def _parse(self, e: dict) -> Optional[Trade]:
         try:
             return Trade(
-                trade_id=str(e["id"]),
+                trade_id=str(e.get("transactionHash", e.get("id", ""))),
                 proxy_wallet=e.get("proxyWallet", ""),
                 condition_id=e.get("conditionId", ""),
-                token_id=e.get("tokenId", ""),
+                token_id=e.get("asset", e.get("tokenId", "")),
                 side=e.get("side", "BUY").upper(),
                 price=float(e.get("price", 0)),
                 size=float(e.get("size", 0)),
