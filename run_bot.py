@@ -1,8 +1,10 @@
 """
-RN1 Copy Bot — with NBA Quarter-Tracking
+RN1 Copy Bot — Sport-Specific Rules
 
-- All non-NBA trades: copied immediately as normal
-- NBA trades: track Q1-Q3, only bet in Q4 if top team leads 10+ pts ≤8 min left
+- Soccer/Football: BLOCKED (too random, low scoring)
+- Tennis: only copy if price >= 0.60 (player already favored/winning)
+- NBA: track Q1-Q3, only bet in Q4 if top team leads 10+ pts <=8 min left
+- All other sports: copy immediately as normal
 """
 import asyncio, os, sys
 from collections import defaultdict
@@ -37,6 +39,8 @@ from trading_bot.signal_generator import Signal, SignalGenerator
 TARGET_WALLET = "0x2005d16a84ceefa912d4e380cd32e7ff827875ea"  # RN1
 ESPN_URL      = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
 
+TENNIS_MIN_PRICE = 0.60  # only copy tennis if player is 60c+ favourite
+
 NBA_KEYWORDS = [
     "nba", "lakers", "warriors", "celtics", "knicks", "nets", "heat", "bulls",
     "spurs", "bucks", "suns", "clippers", "nuggets", "jazz", "hawks", "76ers",
@@ -45,11 +49,41 @@ NBA_KEYWORDS = [
     "timberwolves", "mavericks", "mavs", "rockets",
 ]
 
+TENNIS_KEYWORDS = [
+    "atp", "wta", "itf", "us open", "wimbledon", "french open", "australian open",
+    "roland garros", "davis cup", "grand slam",
+    " vs ", # most tennis markets say "Player A vs Player B"
+]
+
+SOCCER_KEYWORDS = [
+    "premier league", "la liga", "bundesliga", "serie a", "ligue 1",
+    "champions league", "europa league", "mls", "world cup", "euro 2024",
+    "fa cup", "copa del rey", "eredivisie", "primeira liga",
+    "soccer", "football", " fc ", "united vs", "city vs", "arsenal",
+    "chelsea", "liverpool", "barcelona", "real madrid", "manchester",
+    "juventus", "milan", "inter", "psg", "bayern",
+]
+
 # NBA per-game state
 bet_counts  = defaultdict(lambda: defaultdict(int))
 last_trade  = {}
 placed_bets = set()
 monitoring  = set()
+
+
+def is_soccer(title: str) -> bool:
+    tl = title.lower()
+    return any(kw in tl for kw in SOCCER_KEYWORDS)
+
+
+def is_tennis(title: str) -> bool:
+    tl = title.lower()
+    return any(kw in tl for kw in TENNIS_KEYWORDS)
+
+
+def is_nba(title: str) -> bool:
+    tl = title.lower()
+    return any(kw in tl for kw in NBA_KEYWORDS)
 
 
 # ── ESPN API ──────────────────────────────────────────────────────────────────
@@ -136,7 +170,7 @@ def team_leading(game: dict, team: str) -> bool:
 
 async def monitor_and_bet(game_id: str, team: str, trade: Trade,
                           config: Config, executor: TradeExecutor):
-    print(f"\n[Q4 MONITOR] Waiting: {team} must lead 10+ pts with ≤8 min left")
+    print(f"\n[Q4 MONITOR] Waiting: {team} must lead 10+ pts with <=8 min left")
     try:
         while True:
             games = await fetch_games()
@@ -165,7 +199,7 @@ async def monitor_and_bet(game_id: str, team: str, trade: Trade,
                 continue
 
             if mins > 8:
-                print(f"[Q4 MONITOR] {mins:.1f} min left — need ≤8...")
+                print(f"[Q4 MONITOR] {mins:.1f} min left — need <=8...")
                 await asyncio.sleep(20)
                 continue
 
@@ -199,14 +233,21 @@ async def main():
     generator = SignalGenerator(config, target_wallet=TARGET_WALLET)
 
     print("\n[BOT] RN1 Copy Bot started")
-    print("[BOT] Non-NBA trades: copy immediately")
-    print("[BOT] NBA trades: track quarters, bet Q4 only with 10+ lead ≤8 min\n")
+    print("[BOT] Soccer/Football: BLOCKED")
+    print(f"[BOT] Tennis: copy only if price >= {TENNIS_MIN_PRICE:.0%}")
+    print("[BOT] NBA: Q4 only, 10pt lead, <=8 min")
+    print("[BOT] Other sports: copy immediately\n")
 
     async for trade in feed.stream(TARGET_WALLET):
         tl = trade.title.lower()
 
+        # ── BLOCK soccer ─────────────────────────────────────────────────
+        if is_soccer(trade.title):
+            print(f"[SKIP] Soccer blocked: {trade.title[:60]}")
+            continue
+
         # ── NBA market ────────────────────────────────────────────────────
-        if any(kw in tl for kw in NBA_KEYWORDS) and \
+        if is_nba(trade.title) and \
            trade.outcome.lower() not in ("yes", "no", "over", "under", ""):
 
             games = await fetch_games()
@@ -225,7 +266,7 @@ async def main():
 
             last_trade[game["id"]] = trade
             score_str = f"{game['away']} {game['away_score']}-{game['home_score']} {game['home']}"
-            print(f"\n[NBA] Q{quarter} | RN1 → {team} | {score_str}")
+            print(f"\n[NBA] Q{quarter} | RN1 -> {team} | {score_str}")
 
             if quarter in (1, 2, 3):
                 bet_counts[game["id"]][team] += 1
@@ -248,18 +289,25 @@ async def main():
                 asyncio.create_task(
                     monitor_and_bet(game["id"], top_team, trade, config, executor)
                 )
+            continue
+
+        # ── Tennis: price filter ──────────────────────────────────────────
+        if is_tennis(trade.title):
+            if trade.price < TENNIS_MIN_PRICE:
+                print(f"[SKIP] Tennis price {trade.price:.2f} < {TENNIS_MIN_PRICE} | {trade.title[:60]}")
+                continue
+            print(f"[TENNIS] Price {trade.price:.2f} >= {TENNIS_MIN_PRICE} — copying")
 
         # ── All other markets: copy immediately ───────────────────────────
+        signal = generator.process(trade)
+        if signal is None:
+            continue
+        result = await executor.execute(signal)
+        if result.success:
+            lbl = "[SIM]" if result.is_simulated else "[LIVE]"
+            print(f"  {lbl} BET COPIED! {trade.outcome} | order_id={result.order_id}\n")
         else:
-            signal = generator.process(trade)
-            if signal is None:
-                continue
-            result = await executor.execute(signal)
-            if result.success:
-                lbl = "[SIM]" if result.is_simulated else "[LIVE]"
-                print(f"  {lbl} BET COPIED! {trade.outcome} | order_id={result.order_id}\n")
-            else:
-                print(f"  [ERROR] {result.error}\n")
+            print(f"  [ERROR] {result.error}\n")
 
 
 if __name__ == "__main__":
