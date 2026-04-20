@@ -324,27 +324,7 @@ async def main():
 
         # ── Tennis ────────────────────────────────────────────────────────
         if sport == "tennis":
-            if trade.outcome.lower() in ("yes", "no", "over", "under", ""):
-                continue
-            match_key = trade.title[:80].lower()
-            player    = trade.outcome.strip()
-            tennis_counts[match_key][player] += 1
-            tennis_trades[match_key] = trade
-            count = tennis_counts[match_key][player]
-            print(f"\n[TENNIS] RN1 -> {player} ({count}x) @ {trade.price:.2f} | {trade.title[:50]}")
-
-            if count >= TENNIS_MIN_BETS and trade.price >= TENNIS_MIN_PRICE:
-                print(f"[TENNIS] Conditions met ({count} bets, {trade.price:.2f}) — copying")
-                signal = generator.process(trade)
-                if signal:
-                    result = await executor.execute(signal)
-                    if result.success:
-                        lbl = "[SIM]" if result.is_simulated else "[LIVE]"
-                        print(f"  {lbl} BET COPIED! {trade.outcome} | order_id={result.order_id}")
-                    else:
-                        print(f"  [ERROR] {result.error}")
-            else:
-                print(f"[TENNIS] Skip — need {TENNIS_MIN_BETS}+ bets and price>={TENNIS_MIN_PRICE}")
+            print(f"[SKIP] Tennis blocked: {trade.title[:60]}")
             continue
 
         # ── NBA / NFL / NHL / MLB ─────────────────────────────────────────
