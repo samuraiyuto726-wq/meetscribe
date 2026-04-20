@@ -300,7 +300,7 @@ async def main():
     print("[BOT] NFL: Q4, 14+ pt lead, <=5 min")
     print("[BOT] NHL: P3, 2+ goal lead, <=10 min")
     print("[BOT] MLB: inn8+, 4+ run lead")
-    print("[BOT] Other: copy immediately\n")
+    print("[BOT] Other: SKIPPED\n")
 
     async for trade in feed.stream(TARGET_WALLET):
         sport = detect_sport(trade.title)
@@ -382,16 +382,8 @@ async def main():
                 )
             continue
 
-        # ── All other markets: copy immediately ───────────────────────────
-        signal = generator.process(trade)
-        if signal is None:
-            continue
-        result = await executor.execute(signal)
-        if result.success:
-            lbl = "[SIM]" if result.is_simulated else "[LIVE]"
-            print(f"  {lbl} BET COPIED! {trade.outcome} | order_id={result.order_id}\n")
-        else:
-            print(f"  [ERROR] {result.error}\n")
+        # ── Unknown sport: skip ───────────────────────────────────────────
+        print(f"[SKIP] No strategy for: {trade.title[:60]}")
 
 
 if __name__ == "__main__":
