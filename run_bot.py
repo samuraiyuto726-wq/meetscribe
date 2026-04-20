@@ -303,6 +303,18 @@ async def main():
     print("[BOT] Other: SKIPPED\n")
 
     async for trade in feed.stream(TARGET_WALLET):
+
+        # ── Block SELL orders ─────────────────────────────────────────────
+        if trade.side == "SELL":
+            print(f"[SKIP] Sell order ignored: {trade.title[:60]}")
+            continue
+
+        # ── Block qualification matches ───────────────────────────────────
+        tl = trade.title.lower()
+        if any(k in tl for k in ("qualification", "qualifying", "qualifier", "q1 ", "q2 ", "q3 ")):
+            print(f"[SKIP] Qualification match: {trade.title[:60]}")
+            continue
+
         sport = detect_sport(trade.title)
 
         # ── Block soccer ──────────────────────────────────────────────────
