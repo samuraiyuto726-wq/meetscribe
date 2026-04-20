@@ -53,8 +53,8 @@ SPORT_CONDITIONS = {
     "mlb": {"period": 8, "min_lead": 4,  "max_mins": None, "early_periods": tuple(range(1,8))},
 }
 
-TENNIS_MIN_PRICE  = 0.85
-TENNIS_MIN_BETS   = 3
+TENNIS_MIN_PRICE  = 0.92
+TENNIS_MIN_BETS   = 4
 
 ESPN_URLS = {
     "nba": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",
