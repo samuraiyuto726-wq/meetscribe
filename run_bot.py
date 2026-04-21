@@ -295,7 +295,7 @@ async def main():
 
     print("\n[BOT] RN1 Copy Bot — Multi-Sport")
     print("[BOT] Soccer: BLOCKED")
-    print(f"[BOT] Tennis: 2+ bets same player + price >= {TENNIS_MIN_PRICE:.0%}")
+    print(f"[BOT] Tennis: R16+, {TENNIS_MIN_BETS}+ bets, price >= {TENNIS_MIN_PRICE:.0%}")
     print("[BOT] NBA: Q4, 10+ pt lead, <=8 min")
     print("[BOT] NFL: Q4, 14+ pt lead, <=5 min")
     print("[BOT] NHL: P3, 2+ goal lead, <=10 min")
@@ -324,7 +324,35 @@ async def main():
 
         # ── Tennis ────────────────────────────────────────────────────────
         if sport == "tennis":
-            print(f"[SKIP] Tennis blocked: {trade.title[:60]}")
+            if trade.outcome.lower() in ("yes", "no", "over", "under", ""):
+                continue
+            # Only Round of 16 and beyond (top players, consistent form)
+            tl2 = trade.title.lower()
+            allowed = any(k in tl2 for k in (
+                "round of 16", "quarterfinal", "semifinal", "semi-final",
+                "final", "quarter-final", "r16", "qf", "sf",
+            ))
+            if not allowed:
+                print(f"[SKIP] Tennis early round: {trade.title[:60]}")
+                continue
+            match_key = trade.title[:80].lower()
+            player    = trade.outcome.strip()
+            tennis_counts[match_key][player] += 1
+            tennis_trades[match_key] = trade
+            count = tennis_counts[match_key][player]
+            print(f"\n[TENNIS] RN1 -> {player} ({count}x) @ {trade.price:.2f} | {trade.title[:50]}")
+            if count >= TENNIS_MIN_BETS and trade.price >= TENNIS_MIN_PRICE:
+                print(f"[TENNIS] Conditions met — copying")
+                signal = generator.process(trade)
+                if signal:
+                    result = await executor.execute(signal)
+                    if result.success:
+                        lbl = "[SIM]" if result.is_simulated else "[LIVE]"
+                        print(f"  {lbl} BET COPIED! {trade.outcome} | order_id={result.order_id}")
+                    else:
+                        print(f"  [ERROR] {result.error}")
+            else:
+                print(f"[TENNIS] Skip — need {TENNIS_MIN_BETS}+ bets and price>={TENNIS_MIN_PRICE}")
             continue
 
         # ── NBA / NFL / NHL / MLB ─────────────────────────────────────────
