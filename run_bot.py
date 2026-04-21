@@ -53,8 +53,11 @@ SPORT_CONDITIONS = {
     "mlb": {"period": 8, "min_lead": 4,  "max_mins": None, "early_periods": tuple(range(1,8))},
 }
 
-TENNIS_MIN_PRICE  = 0.92
-TENNIS_MIN_BETS   = 4
+TENNIS_MIN_PRICE        = 0.92   # normal tournaments
+TENNIS_GRAND_SLAM_PRICE = 0.90   # grand slams (slightly looser)
+TENNIS_MIN_BETS         = 4
+TENNIS_MIN_BET_SIZE     = 500    # RN1 must have bet $500+ total on this player
+GRAND_SLAM_KEYWORDS     = ("us open", "wimbledon", "french open", "australian open", "roland garros")
 
 ESPN_URLS = {
     "nba": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",
@@ -107,8 +110,9 @@ bet_counts  = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
 placed_bets = set()   # "sport:game_id"
 monitoring  = set()   # "sport:game_id"
 
-# Tennis: match_key -> {player: count}
+# Tennis: match_key -> {player: count/usd}
 tennis_counts = defaultdict(lambda: defaultdict(int))
+tennis_usd    = defaultdict(lambda: defaultdict(float))  # total USD bet by RN1 per player
 tennis_trades = {}   # match_key -> latest trade
 
 
@@ -326,22 +330,25 @@ async def main():
         if sport == "tennis":
             if trade.outcome.lower() in ("yes", "no", "over", "under", ""):
                 continue
-            # Only Round of 16 and beyond (top players, consistent form)
-            tl2 = trade.title.lower()
-            allowed = any(k in tl2 for k in (
+            tl2        = trade.title.lower()
+            is_slam    = any(k in tl2 for k in GRAND_SLAM_KEYWORDS)
+            is_r16plus = any(k in tl2 for k in (
                 "round of 16", "quarterfinal", "semifinal", "semi-final",
                 "final", "quarter-final", "r16", "qf", "sf",
             ))
-            if not allowed:
+            if not is_slam and not is_r16plus:
                 print(f"[SKIP] Tennis early round: {trade.title[:60]}")
                 continue
             match_key = trade.title[:80].lower()
             player    = trade.outcome.strip()
             tennis_counts[match_key][player] += 1
+            tennis_usd[match_key][player]    += trade.usd_size
             tennis_trades[match_key] = trade
-            count = tennis_counts[match_key][player]
-            print(f"\n[TENNIS] RN1 -> {player} ({count}x) @ {trade.price:.2f} | {trade.title[:50]}")
-            if count >= TENNIS_MIN_BETS and trade.price >= TENNIS_MIN_PRICE:
+            count     = tennis_counts[match_key][player]
+            total_usd = tennis_usd[match_key][player]
+            min_price = TENNIS_GRAND_SLAM_PRICE if is_slam else TENNIS_MIN_PRICE
+            print(f"\n[TENNIS] RN1 -> {player} ({count}x, ${total_usd:.0f}) @ {trade.price:.2f} | {trade.title[:50]}")
+            if count >= TENNIS_MIN_BETS and trade.price >= min_price and total_usd >= TENNIS_MIN_BET_SIZE:
                 print(f"[TENNIS] Conditions met — copying")
                 signal = generator.process(trade)
                 if signal:
@@ -352,7 +359,7 @@ async def main():
                     else:
                         print(f"  [ERROR] {result.error}")
             else:
-                print(f"[TENNIS] Skip — need {TENNIS_MIN_BETS}+ bets and price>={TENNIS_MIN_PRICE}")
+                print(f"[TENNIS] Skip — need {TENNIS_MIN_BETS}+ bets, ${TENNIS_MIN_BET_SIZE}+, price>={min_price}")
             continue
 
         # ── NBA / NFL / NHL / MLB ─────────────────────────────────────────
