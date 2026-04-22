@@ -53,17 +53,17 @@ SPORT_CONDITIONS = {
     "mlb": {"period": 8, "min_lead": 4,  "max_mins": None, "early_periods": tuple(range(1,8))},
 }
 
-TENNIS_MIN_PRICE        = 0.92   # normal tournaments
-TENNIS_GRAND_SLAM_PRICE = 0.90   # grand slams (slightly looser)
-TENNIS_MIN_BETS         = 4
-TENNIS_MIN_BET_SIZE     = 500    # RN1 must have bet $500+ total on this player
-GRAND_SLAM_KEYWORDS     = ("us open", "wimbledon", "french open", "australian open", "roland garros")
+TENNIS_MIN_BETS     = 4
+TENNIS_MIN_BET_SIZE = 500    # RN1 must have bet $500+ total on this player
+GRAND_SLAM_KEYWORDS = ("us open", "wimbledon", "french open", "australian open", "roland garros")
 
 ESPN_URLS = {
     "nba": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",
     "nfl": "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard",
     "nhl": "https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard",
     "mlb": "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard",
+    "tennis_atp": "https://site.api.espn.com/apis/site/v2/sports/tennis/atp/scoreboard",
+    "tennis_wta": "https://site.api.espn.com/apis/site/v2/sports/tennis/wta/scoreboard",
 }
 
 NBA_KEYWORDS = [
@@ -129,6 +129,42 @@ def detect_sport(title: str) -> Optional[str]:
     # fallback: "X vs Y" pattern without ATP/WTA is likely tennis
     if " vs " in tl and not any(k in tl for k in NBA_KEYWORDS + NFL_KEYWORDS + NHL_KEYWORDS + MLB_KEYWORDS):
         return "tennis"
+    return None
+
+
+async def fetch_tennis_match(player: str) -> Optional[dict]:
+    """Check ESPN ATP+WTA scoreboards, return match info if player leads 2-0 in sets."""
+    pl = player.lower()
+    for url_key in ("tennis_atp", "tennis_wta"):
+        url = ESPN_URLS[url_key]
+        try:
+            async with aiohttp.ClientSession() as sess:
+                async with sess.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    data = await resp.json()
+            for event in data.get("events", []):
+                comp        = event.get("competitions", [{}])[0]
+                competitors = comp.get("competitors", [])
+                status      = event.get("status", {}).get("type", {}).get("name", "")
+                if status not in ("STATUS_IN_PROGRESS",):
+                    continue
+                for c in competitors:
+                    name = c.get("athlete", {}).get("displayName", "").lower()
+                    if not any(w in name for w in pl.split() if len(w) > 3):
+                        continue
+                    # Count sets won
+                    linescores = c.get("linescores", [])
+                    sets_won   = 0
+                    opp        = next((x for x in competitors if x != c), None)
+                    for i, ls in enumerate(linescores):
+                        my_games  = int(ls.get("value", 0) or 0)
+                        opp_games = int((opp.get("linescores", [{}]*10)[i] if opp else {}).get("value", 0) or 0) if opp else 0
+                        if my_games > opp_games and my_games >= 6:
+                            sets_won += 1
+                    print(f"[TENNIS SCORE] {name} sets won: {sets_won}")
+                    if sets_won >= 2:
+                        return {"sets_won": sets_won, "name": name}
+        except Exception as exc:
+            print(f"[TENNIS SCORE] Error: {exc}")
     return None
 
 
@@ -346,20 +382,25 @@ async def main():
             tennis_trades[match_key] = trade
             count     = tennis_counts[match_key][player]
             total_usd = tennis_usd[match_key][player]
-            min_price = TENNIS_GRAND_SLAM_PRICE if is_slam else TENNIS_MIN_PRICE
             print(f"\n[TENNIS] RN1 -> {player} ({count}x, ${total_usd:.0f}) @ {trade.price:.2f} | {trade.title[:50]}")
-            if count >= TENNIS_MIN_BETS and trade.price >= min_price and total_usd >= TENNIS_MIN_BET_SIZE:
-                print(f"[TENNIS] Conditions met — copying")
-                signal = generator.process(trade)
-                if signal:
-                    result = await executor.execute(signal)
-                    if result.success:
-                        lbl = "[SIM]" if result.is_simulated else "[LIVE]"
-                        print(f"  {lbl} BET COPIED! {trade.outcome} | order_id={result.order_id}")
-                    else:
-                        print(f"  [ERROR] {result.error}")
+
+            if count >= TENNIS_MIN_BETS and total_usd >= TENNIS_MIN_BET_SIZE:
+                # Check real scoreboard — player must lead 2-0 in sets
+                match_data = await fetch_tennis_match(player)
+                if match_data:
+                    print(f"[TENNIS] Scoreboard: {player} leads {match_data['sets_won']}-0 in sets — copying")
+                    signal = generator.process(trade)
+                    if signal:
+                        result = await executor.execute(signal)
+                        if result.success:
+                            lbl = "[SIM]" if result.is_simulated else "[LIVE]"
+                            print(f"  {lbl} BET COPIED! {trade.outcome} | order_id={result.order_id}")
+                        else:
+                            print(f"  [ERROR] {result.error}")
+                else:
+                    print(f"[TENNIS] Skip — player not leading 2-0 on scoreboard")
             else:
-                print(f"[TENNIS] Skip — need {TENNIS_MIN_BETS}+ bets, ${TENNIS_MIN_BET_SIZE}+, price>={min_price}")
+                print(f"[TENNIS] Skip — need {TENNIS_MIN_BETS}+ bets and ${TENNIS_MIN_BET_SIZE}+")
             continue
 
         # ── NBA / NFL / NHL / MLB ─────────────────────────────────────────
