@@ -402,6 +402,10 @@ async def main():
                 print(f"[TENNIS] Skip — need {TENNIS_T3_MIN_BETS}+ bets and ${TENNIS_T3_MIN_USD}+ (Tier 3 min)")
                 continue
 
+            if trade.price < 0.92:
+                print(f"[TENNIS] Skip — price {trade.price:.2f} below 0.92 floor")
+                continue
+
             match_data = await fetch_tennis_match(player)
             if match_data is None:
                 print(f"[TENNIS] Skip — player not found in any live match on ESPN")
@@ -477,6 +481,9 @@ async def main():
                     print(f"[{sport.upper()}] Skip — bets tied")
                     continue
                 top_team = max(counts, key=counts.get)
+                if trade.price < 0.92:
+                    print(f"[{sport.upper()}] Skip — price {trade.price:.2f} below 0.92 floor")
+                    continue
                 print(f"[{sport.upper()}] Top team = {top_team} — starting monitor")
                 monitoring.add(bet_key)
                 asyncio.create_task(
