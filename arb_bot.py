@@ -24,8 +24,6 @@ with open(r'C:\Users\glmar\.env') as f:
         if line.startswith('PRIVATE_KEY='):
             os.environ['PRIVATE_KEY'] = line.split('=', 1)[1]
 
-sys.path.insert(0, r'C:\Users\glmar\meetscribe')
-
 import aiohttp
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -48,7 +46,7 @@ logging.basicConfig(
     format="%(asctime)s | %(message)s",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler("arb_bot.log", mode="a"),
+        logging.FileHandler(r"C:\Users\glmar\arb_bot\arb_bot.log", mode="a"),
     ],
 )
 log = logging.getLogger("arb_bot")
