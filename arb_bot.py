@@ -38,7 +38,8 @@ PROXY_WALLET = os.environ.get('PROXY_WALLET', '')
 CHAIN_ID     = int(os.environ.get('CHAIN_ID', '137'))
 
 # ── State ─────────────────────────────────────────────────────────────────────
-placed_arbs: set = set()  # condition_ids already acted on
+placed_arbs: set  = set()   # condition_ids already acted on
+session_log: list = []      # all opportunities found this session
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -184,6 +185,15 @@ async def scan_and_arb(client) -> None:
             log.info(f"  Shares  : {shares:.4f} on each side")
             log.info(f"  Cost    : ${TOTAL_BET_USD:.2f}  |  Payout: ${shares:.4f}  |  Profit: ${profit_usd:.4f}")
 
+            session_log.append({
+                "question":   m.get("question", "")[:70],
+                "yes_ask":    yes_ask,
+                "no_ask":     no_ask,
+                "total":      total,
+                "profit_usd": profit_usd,
+                "profit_pct": profit_pct,
+            })
+
             if DRY_RUN:
                 log.info(f"  [DRY RUN] Skipping real orders.")
                 placed_arbs.add(condition_id)
@@ -220,6 +230,23 @@ async def scan_and_arb(client) -> None:
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+def print_summary() -> None:
+    print("\n" + "="*60)
+    print("  SESSION SUMMARY")
+    print("="*60)
+    if not session_log:
+        print("  No arb opportunities were found this session.")
+    else:
+        total_profit = sum(o["profit_usd"] for o in session_log)
+        print(f"  Opportunities found : {len(session_log)}")
+        print(f"  Total profit would be: ${total_profit:.4f}")
+        print(f"  Average per trade   : ${total_profit / len(session_log):.4f}")
+        print()
+        for i, o in enumerate(session_log, 1):
+            print(f"  #{i:02d} | Gap {o['profit_pct']:.1f}% | Profit ${o['profit_usd']:.4f} | {o['question']}")
+    print("="*60 + "\n")
+
+
 async def main() -> None:
     log.info("\n" + "="*60)
     log.info("[ARB BOT] Polymarket Same-Market Arbitrage Bot")
@@ -239,16 +266,24 @@ async def main() -> None:
             return
 
     scan_num = 0
-    while True:
-        scan_num += 1
-        log.info(f"\n[SCAN #{scan_num}] {time.strftime('%Y-%m-%d %H:%M:%S')}")
-        try:
-            await scan_and_arb(client)
-        except Exception as exc:
-            log.error(f"Scan error: {exc}")
-        log.info(f"Waiting {SCAN_INTERVAL}s until next scan...")
-        await asyncio.sleep(SCAN_INTERVAL)
+    try:
+        while True:
+            scan_num += 1
+            log.info(f"\n[SCAN #{scan_num}] {time.strftime('%Y-%m-%d %H:%M:%S')}")
+            try:
+                await scan_and_arb(client)
+            except Exception as exc:
+                log.error(f"Scan error: {exc}")
+            log.info(f"Waiting {SCAN_INTERVAL}s until next scan...")
+            await asyncio.sleep(SCAN_INTERVAL)
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        pass
+    finally:
+        print_summary()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
