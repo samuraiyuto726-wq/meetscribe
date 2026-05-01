@@ -631,13 +631,25 @@ async def scan_basketball_indie_loop(config: Config, executor: TradeExecutor):
     async with aiohttp.ClientSession() as session:
         while True:
             try:
-                for g in await _espn_games(session, urls):
-                    if g["status"] != "STATUS_IN_PROGRESS": continue
-                    if g["period"] != 4: continue
-                    if clock_minutes(g["clock"]) > 5: continue
+                games = await _espn_games(session, urls)
+                live = [g for g in games if g["status"] == "STATUS_IN_PROGRESS"]
+                if not live:
+                    print("[BBALL] No live games")
+                for g in live:
                     lead = abs(g["home_score"] - g["away_score"])
-                    if lead < 15: continue
+                    mins = clock_minutes(g["clock"])
+                    print(f"[BBALL] {g['away_name']} vs {g['home_name']} | Q{g['period']} {g['clock']} | Lead:{lead}")
+                    if g["period"] != 4:
+                        print(f"[BBALL]  -> Skip: not Q4 yet")
+                        continue
+                    if mins > 5:
+                        print(f"[BBALL]  -> Skip: {mins:.1f} min left (need <=5)")
+                        continue
+                    if lead < 15:
+                        print(f"[BBALL]  -> Skip: lead {lead} (need 15+)")
+                        continue
                     leader = g["home_name"] if g["home_score"] > g["away_score"] else g["away_name"]
+                    print(f"[BBALL]  -> CONDITION MET! {leader} — searching market...")
                     await find_and_bet_market("BBALL", leader, bball_indie, session, config, executor)
             except Exception as e:
                 print(f"[BBALL] Error: {e}")
@@ -653,13 +665,25 @@ async def scan_football_indie_loop(config: Config, executor: TradeExecutor):
     async with aiohttp.ClientSession() as session:
         while True:
             try:
-                for g in await _espn_games(session, urls):
-                    if g["status"] != "STATUS_IN_PROGRESS": continue
-                    if g["period"] != 4: continue
-                    if clock_minutes(g["clock"]) > 3: continue
+                games = await _espn_games(session, urls)
+                live = [g for g in games if g["status"] == "STATUS_IN_PROGRESS"]
+                if not live:
+                    print("[FOOTBALL] No live games")
+                for g in live:
                     lead = abs(g["home_score"] - g["away_score"])
-                    if lead < 21: continue
+                    mins = clock_minutes(g["clock"])
+                    print(f"[FOOTBALL] {g['away_name']} vs {g['home_name']} | Q{g['period']} {g['clock']} | Lead:{lead}")
+                    if g["period"] != 4:
+                        print(f"[FOOTBALL]  -> Skip: not Q4 yet")
+                        continue
+                    if mins > 3:
+                        print(f"[FOOTBALL]  -> Skip: {mins:.1f} min left (need <=3)")
+                        continue
+                    if lead < 21:
+                        print(f"[FOOTBALL]  -> Skip: lead {lead} (need 21+)")
+                        continue
                     leader = g["home_name"] if g["home_score"] > g["away_score"] else g["away_name"]
+                    print(f"[FOOTBALL]  -> CONDITION MET! {leader} — searching market...")
                     await find_and_bet_market("FOOTBALL", leader, football_indie, session, config, executor)
             except Exception as e:
                 print(f"[FOOTBALL] Error: {e}")
@@ -675,13 +699,25 @@ async def scan_hockey_indie_loop(config: Config, executor: TradeExecutor):
     async with aiohttp.ClientSession() as session:
         while True:
             try:
-                for g in await _espn_games(session, urls):
-                    if g["status"] != "STATUS_IN_PROGRESS": continue
-                    if g["period"] != 3: continue
-                    if clock_minutes(g["clock"]) > 5: continue
+                games = await _espn_games(session, urls)
+                live = [g for g in games if g["status"] == "STATUS_IN_PROGRESS"]
+                if not live:
+                    print("[HOCKEY] No live games")
+                for g in live:
                     lead = abs(g["home_score"] - g["away_score"])
-                    if lead < 3: continue
+                    mins = clock_minutes(g["clock"])
+                    print(f"[HOCKEY] {g['away_name']} vs {g['home_name']} | P{g['period']} {g['clock']} | Lead:{lead}")
+                    if g["period"] != 3:
+                        print(f"[HOCKEY]  -> Skip: not P3 yet")
+                        continue
+                    if mins > 5:
+                        print(f"[HOCKEY]  -> Skip: {mins:.1f} min left (need <=5)")
+                        continue
+                    if lead < 3:
+                        print(f"[HOCKEY]  -> Skip: lead {lead} (need 3+)")
+                        continue
                     leader = g["home_name"] if g["home_score"] > g["away_score"] else g["away_name"]
+                    print(f"[HOCKEY]  -> CONDITION MET! {leader} — searching market...")
                     await find_and_bet_market("HOCKEY", leader, hockey_indie, session, config, executor)
             except Exception as e:
                 print(f"[HOCKEY] Error: {e}")
@@ -697,12 +733,21 @@ async def scan_baseball_indie_loop(config: Config, executor: TradeExecutor):
     async with aiohttp.ClientSession() as session:
         while True:
             try:
-                for g in await _espn_games(session, urls):
-                    if g["status"] != "STATUS_IN_PROGRESS": continue
-                    if g["period"] < 9: continue
+                games = await _espn_games(session, urls)
+                live = [g for g in games if g["status"] == "STATUS_IN_PROGRESS"]
+                if not live:
+                    print("[BASEBALL] No live games")
+                for g in live:
                     lead = abs(g["home_score"] - g["away_score"])
-                    if lead < 6: continue
+                    print(f"[BASEBALL] {g['away_name']} vs {g['home_name']} | Inn{g['period']} | Lead:{lead}")
+                    if g["period"] < 9:
+                        print(f"[BASEBALL]  -> Skip: inning {g['period']} (need 9+)")
+                        continue
+                    if lead < 6:
+                        print(f"[BASEBALL]  -> Skip: lead {lead} (need 6+)")
+                        continue
                     leader = g["home_name"] if g["home_score"] > g["away_score"] else g["away_name"]
+                    print(f"[BASEBALL]  -> CONDITION MET! {leader} — searching market...")
                     await find_and_bet_market("BASEBALL", leader, baseball_indie, session, config, executor)
             except Exception as e:
                 print(f"[BASEBALL] Error: {e}")
