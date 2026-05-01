@@ -321,7 +321,7 @@ async def monitor_and_bet(sport: str, game_id: str, team: str, trade: Trade,
             # MLB has no clock — just check inning and lead
             if cond["max_mins"] is None:
                 if period < cond["period"]:
-                    await asyncio.sleep(30)
+                    await asyncio.sleep(1)
                     continue
                 winning = team_leading(game, team)
                 print(f"[{label} MONITOR] Inning {period} | Lead:{lead} | {team} winning:{winning}")
@@ -330,11 +330,11 @@ async def monitor_and_bet(sport: str, game_id: str, team: str, trade: Trade,
                     break
                 if lead < cond["min_lead"]:
                     print(f"[{label} MONITOR] Lead {lead} — need {cond['min_lead']}+...")
-                    await asyncio.sleep(30)
+                    await asyncio.sleep(1)
                     continue
             else:
                 if period != cond["period"]:
-                    await asyncio.sleep(15)
+                    await asyncio.sleep(1)
                     continue
                 mins    = clock_minutes(game["clock"])
                 winning = team_leading(game, team)
@@ -503,7 +503,7 @@ async def scan_rugby_loop(config: Config, executor: TradeExecutor):
                         await find_and_bet_market("RUGBY", leader_name, rugby_placed, session, config, executor)
             except Exception as e:
                 print(f"[RUGBY] Error: {e}")
-            await asyncio.sleep(60)
+            await asyncio.sleep(1)
 
 
 async def scan_cricket_loop(config: Config, executor: TradeExecutor):
@@ -542,7 +542,7 @@ async def scan_cricket_loop(config: Config, executor: TradeExecutor):
                     print("[CRICKET] No live games")
             except Exception as e:
                 print(f"[CRICKET] Error: {e}")
-            await asyncio.sleep(60)
+            await asyncio.sleep(1)
 
 
 async def scan_golf_loop(config: Config, executor: TradeExecutor):
@@ -590,7 +590,7 @@ async def scan_golf_loop(config: Config, executor: TradeExecutor):
                     print("[GOLF] No live tournaments")
             except Exception as e:
                 print(f"[GOLF] Error: {e}")
-            await asyncio.sleep(120)
+            await asyncio.sleep(1)
 
 
 async def scan_cs2_loop(config: Config, executor: TradeExecutor):
@@ -630,7 +630,7 @@ async def scan_cs2_loop(config: Config, executor: TradeExecutor):
                         await find_and_bet_market("CS2", leader.get("name", ""), cs2_placed, session, config, executor)
             except Exception as e:
                 print(f"[CS2] Error: {e}")
-            await asyncio.sleep(30)
+            await asyncio.sleep(1)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -674,6 +674,7 @@ async def scan_basketball_indie_loop(config: Config, executor: TradeExecutor):
     async with aiohttp.ClientSession() as session:
         while True:
             try:
+                print("[BBALL] Scanning...")
                 games = await _espn_games(session, urls)
                 live = [g for g in games if g["status"] == "STATUS_IN_PROGRESS"]
                 if not live:
@@ -696,7 +697,7 @@ async def scan_basketball_indie_loop(config: Config, executor: TradeExecutor):
                     await find_and_bet_market("BBALL", leader, bball_indie, session, config, executor)
             except Exception as e:
                 print(f"[BBALL] Error: {e}")
-            await asyncio.sleep(30)
+            await asyncio.sleep(1)
 
 
 async def scan_football_indie_loop(config: Config, executor: TradeExecutor):
@@ -708,6 +709,7 @@ async def scan_football_indie_loop(config: Config, executor: TradeExecutor):
     async with aiohttp.ClientSession() as session:
         while True:
             try:
+                print("[FOOTBALL] Scanning...")
                 games = await _espn_games(session, urls)
                 live = [g for g in games if g["status"] == "STATUS_IN_PROGRESS"]
                 if not live:
@@ -730,7 +732,7 @@ async def scan_football_indie_loop(config: Config, executor: TradeExecutor):
                     await find_and_bet_market("FOOTBALL", leader, football_indie, session, config, executor)
             except Exception as e:
                 print(f"[FOOTBALL] Error: {e}")
-            await asyncio.sleep(30)
+            await asyncio.sleep(1)
 
 
 async def scan_hockey_indie_loop(config: Config, executor: TradeExecutor):
@@ -742,6 +744,7 @@ async def scan_hockey_indie_loop(config: Config, executor: TradeExecutor):
     async with aiohttp.ClientSession() as session:
         while True:
             try:
+                print("[HOCKEY] Scanning...")
                 games = await _espn_games(session, urls)
                 live = [g for g in games if g["status"] == "STATUS_IN_PROGRESS"]
                 if not live:
@@ -764,7 +767,7 @@ async def scan_hockey_indie_loop(config: Config, executor: TradeExecutor):
                     await find_and_bet_market("HOCKEY", leader, hockey_indie, session, config, executor)
             except Exception as e:
                 print(f"[HOCKEY] Error: {e}")
-            await asyncio.sleep(30)
+            await asyncio.sleep(1)
 
 
 async def scan_baseball_indie_loop(config: Config, executor: TradeExecutor):
@@ -776,6 +779,7 @@ async def scan_baseball_indie_loop(config: Config, executor: TradeExecutor):
     async with aiohttp.ClientSession() as session:
         while True:
             try:
+                print("[BASEBALL] Scanning...")
                 games = await _espn_games(session, urls)
                 live = [g for g in games if g["status"] == "STATUS_IN_PROGRESS"]
                 if not live:
@@ -794,7 +798,7 @@ async def scan_baseball_indie_loop(config: Config, executor: TradeExecutor):
                     await find_and_bet_market("BASEBALL", leader, baseball_indie, session, config, executor)
             except Exception as e:
                 print(f"[BASEBALL] Error: {e}")
-            await asyncio.sleep(30)
+            await asyncio.sleep(1)
 
 
 async def main():
