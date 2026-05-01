@@ -492,7 +492,6 @@ async def scan_rugby_loop(config: Config, executor: TradeExecutor):
     async with aiohttp.ClientSession() as session:
         while True:
             try:
-                print("[RUGBY] Checking live games...")
                 for url in RUGBY_URLS:
                     async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
                         data = await r.json()
@@ -537,7 +536,6 @@ async def scan_cricket_loop(config: Config, executor: TradeExecutor):
     async with aiohttp.ClientSession() as session:
         while True:
             try:
-                print("[CRICKET] Checking live games...")
                 async with session.get(CRICKET_URL, timeout=aiohttp.ClientTimeout(total=10)) as r:
                     data = await r.json()
                 live_found = False
@@ -576,7 +574,6 @@ async def scan_golf_loop(config: Config, executor: TradeExecutor):
     async with aiohttp.ClientSession() as session:
         while True:
             try:
-                print("[GOLF] Checking live tournaments...")
                 async with session.get(GOLF_URL, timeout=aiohttp.ClientTimeout(total=10)) as r:
                     data = await r.json()
                 live_found = False
@@ -627,7 +624,6 @@ async def scan_cs2_loop(config: Config, executor: TradeExecutor):
     async with aiohttp.ClientSession() as session:
         while True:
             try:
-                print("[CS2] Checking live matches...")
                 headers = {"Authorization": f"Bearer {PANDASCORE_KEY}"}
                 async with session.get("https://api.pandascore.co/csgo/matches/running",
                                        headers=headers, params={"per_page": 50},
@@ -700,7 +696,6 @@ async def scan_basketball_indie_loop(config: Config, executor: TradeExecutor):
     async with aiohttp.ClientSession() as session:
         while True:
             try:
-                print("[BBALL] Scanning...")
                 games = await _espn_games(session, urls)
                 live = [g for g in games if g["status"] == "STATUS_IN_PROGRESS"]
                 if not live:
@@ -735,7 +730,6 @@ async def scan_football_indie_loop(config: Config, executor: TradeExecutor):
     async with aiohttp.ClientSession() as session:
         while True:
             try:
-                print("[FOOTBALL] Scanning...")
                 games = await _espn_games(session, urls)
                 live = [g for g in games if g["status"] == "STATUS_IN_PROGRESS"]
                 if not live:
@@ -770,7 +764,6 @@ async def scan_hockey_indie_loop(config: Config, executor: TradeExecutor):
     async with aiohttp.ClientSession() as session:
         while True:
             try:
-                print("[HOCKEY] Scanning...")
                 games = await _espn_games(session, urls)
                 live = [g for g in games if g["status"] == "STATUS_IN_PROGRESS"]
                 if not live:
@@ -805,7 +798,6 @@ async def scan_baseball_indie_loop(config: Config, executor: TradeExecutor):
     async with aiohttp.ClientSession() as session:
         while True:
             try:
-                print("[BASEBALL] Scanning...")
                 games = await _espn_games(session, urls)
                 live = [g for g in games if g["status"] == "STATUS_IN_PROGRESS"]
                 if not live:
@@ -856,6 +848,14 @@ async def main():
     asyncio.create_task(scan_football_indie_loop(config, executor))
     asyncio.create_task(scan_hockey_indie_loop(config, executor))
     asyncio.create_task(scan_baseball_indie_loop(config, executor))
+
+    async def heartbeat():
+        n = 0
+        while True:
+            n += 1
+            print(f"[BOT] Scanning all sports... (#{n})", flush=True)
+            await asyncio.sleep(1)
+    asyncio.create_task(heartbeat())
 
     async for trade in feed.stream(TARGET_WALLET):
 
