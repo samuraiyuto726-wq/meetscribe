@@ -9,7 +9,7 @@ RN1 Copy Bot — Multi-Sport Strategy
 - MLB:     track inn1-7, bet inn8+ when top team leads 4+ runs
 - Other:   copy immediately
 """
-import asyncio, os, sys
+import asyncio, os, sys, time, json
 from collections import defaultdict
 from typing import Optional
 
@@ -47,10 +47,10 @@ TARGET_WALLET = "0x2005d16a84ceefa912d4e380cd32e7ff827875ea"  # RN1
 # max_mins = max minutes remaining (None = no clock needed e.g. MLB)
 # early_periods = periods to track RN1 bets before final period
 SPORT_CONDITIONS = {
-    "nba": {"period": 4, "min_lead": 10, "max_mins": 8,    "early_periods": (1,2,3)},
-    "nfl": {"period": 4, "min_lead": 14, "max_mins": 5,    "early_periods": (1,2,3)},
-    "nhl": {"period": 3, "min_lead": 2,  "max_mins": 10,   "early_periods": (1,2)},
-    "mlb": {"period": 8, "min_lead": 4,  "max_mins": None, "early_periods": tuple(range(1,8))},
+    "nba": {"period": 4, "min_lead": 15, "max_mins": 5,    "early_periods": (1,2,3)},
+    "nfl": {"period": 4, "min_lead": 21, "max_mins": 3,    "early_periods": (1,2,3)},
+    "nhl": {"period": 3, "min_lead": 3,  "max_mins": 5,    "early_periods": (1,2)},
+    "mlb": {"period": 9, "min_lead": 6,  "max_mins": None, "early_periods": tuple(range(1,9))},
 }
 
 TENNIS_T1_MIN_BETS = 4     # Tier 1: 2-0 sets won (safest)
@@ -60,6 +60,23 @@ TENNIS_T2_MIN_USD  = 300
 TENNIS_T3_MIN_BETS = 2     # Tier 3: winning current set by 3+ games (most frequent)
 TENNIS_T3_MIN_USD  = 200
 GRAND_SLAM_KEYWORDS = ("us open", "wimbledon", "french open", "australian open", "roland garros")
+
+PANDASCORE_KEY = ""  # Free key at pandascore.co — needed for CS2 scanner
+
+GAMMA_API = "https://gamma-api.polymarket.com"
+CLOB_API  = "https://clob.polymarket.com"
+
+RUGBY_URLS = [
+    "https://site.api.espn.com/apis/site/v2/sports/rugby/international/scoreboard",
+    "https://site.api.espn.com/apis/site/v2/sports/rugby/premiership/scoreboard",
+]
+CRICKET_URL = "https://site.api.espn.com/apis/site/v2/sports/cricket/icc/scoreboard"
+GOLF_URL    = "https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard"
+
+rugby_placed   = set()
+cricket_placed = set()
+golf_placed    = set()
+cs2_placed     = set()
 
 ESPN_URLS = {
     "nba": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",
@@ -332,6 +349,225 @@ async def monitor_and_bet(sport: str, game_id: str, team: str, trade: Trade,
         monitoring.discard(f"{sport}:{game_id}")
 
 
+# ── Independent bet helper ────────────────────────────────────────────────────
+
+async def find_and_bet_market(label: str, team_name: str, placed_set: set,
+                               session: aiohttp.ClientSession,
+                               config: Config, executor: TradeExecutor) -> bool:
+    key = f"{label}:{team_name.lower()}"
+    if key in placed_set:
+        return False
+
+    try:
+        params = {"q": team_name, "active": "true", "closed": "false", "limit": 20}
+        async with session.get(f"{GAMMA_API}/markets", params=params,
+                               timeout=aiohttp.ClientTimeout(total=10)) as r:
+            raw = await r.json()
+        markets = raw if isinstance(raw, list) else raw.get("markets", [])
+    except Exception as e:
+        print(f"[{label}] Market search error: {e}")
+        return False
+
+    team_low = team_name.lower()
+    for m in markets:
+        question = m.get("question", "").lower()
+        if team_low not in question:
+            continue
+        if not any(w in question for w in ("win", "winner", "champion", "title")):
+            continue
+        if m.get("closed") or not m.get("active"):
+            continue
+
+        # Get YES token ID
+        clob_ids = m.get("clobTokenIds", [])
+        outcomes_raw = m.get("outcomes", "[]")
+        try:
+            outcomes = json.loads(outcomes_raw) if isinstance(outcomes_raw, str) else outcomes_raw
+        except Exception:
+            outcomes = []
+        yes_idx = next((i for i, o in enumerate(outcomes) if str(o).lower() == "yes"), None)
+        if yes_idx is None or yes_idx >= len(clob_ids):
+            continue
+        yes_token_id = clob_ids[yes_idx]
+
+        # Get current ask price
+        try:
+            async with session.get(f"{CLOB_API}/price",
+                                   params={"token_id": yes_token_id, "side": "buy"},
+                                   timeout=aiohttp.ClientTimeout(total=5)) as r:
+                price_data = await r.json()
+            ask = float(price_data.get("price", 0))
+        except Exception as e:
+            print(f"[{label}] Price fetch error: {e}")
+            continue
+
+        print(f"[{label}] Found: '{m.get('question','')[:70]}' — YES ask: {ask:.2f}")
+
+        if ask >= 0.97:
+            print(f"[{label}] Skip — price {ask:.2f} >= 0.97 (no profit)")
+            return False
+        if ask < 0.85:
+            print(f"[{label}] Skip — price {ask:.2f} < 0.85 (market too uncertain)")
+            return False
+
+        placed_set.add(key)
+        synthetic = Trade(
+            trade_id=f"indie_{label}_{int(time.time())}",
+            proxy_wallet="",
+            condition_id=m.get("conditionId", ""),
+            token_id=yes_token_id,
+            side="BUY",
+            price=ask,
+            size=round(config.copy_amount_usd / ask, 4),
+            usd_size=config.copy_amount_usd,
+            outcome="Yes",
+            title=m.get("question", team_name),
+        )
+        signal = Signal(trade=synthetic, copy_amount_usd=config.copy_amount_usd)
+        print(f"\n[{label} BET] *** PLACING BET *** {team_name} @ {ask:.2f}")
+        result = await executor.execute(signal)
+        if result.success:
+            lbl = "[SIM]" if result.is_simulated else "[LIVE]"
+            print(f"  {lbl} Bet placed! order_id={result.order_id}")
+        else:
+            print(f"  [ERROR] {result.error}")
+        return True
+
+    print(f"[{label}] No suitable market found for '{team_name}'")
+    return False
+
+
+# ── Independent scanners ──────────────────────────────────────────────────────
+
+async def scan_rugby_loop(config: Config, executor: TradeExecutor):
+    print("[RUGBY] Scanner started — 20+ pt lead, 2nd half, 35+ min elapsed")
+    async with aiohttp.ClientSession() as session:
+        while True:
+            try:
+                for url in RUGBY_URLS:
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
+                        data = await r.json()
+                    for event in data.get("events", []):
+                        status = event.get("status", {})
+                        if status.get("type", {}).get("name") != "STATUS_IN_PROGRESS":
+                            continue
+                        comp = event.get("competitions", [{}])[0]
+                        competitors = comp.get("competitors", [])
+                        if len(competitors) < 2:
+                            continue
+                        home = next((c for c in competitors if c.get("homeAway") == "home"), competitors[0])
+                        away = next((c for c in competitors if c.get("homeAway") == "away"), competitors[1])
+                        home_score = int(home.get("score", 0) or 0)
+                        away_score = int(away.get("score", 0) or 0)
+                        lead    = abs(home_score - away_score)
+                        period  = status.get("period", 0)
+                        elapsed = clock_minutes(status.get("displayClock", "0:00"))
+                        if period < 2 or elapsed < 35 or lead < 20:
+                            continue
+                        leader = home if home_score > away_score else away
+                        leader_name = leader.get("team", {}).get("displayName", "")
+                        await find_and_bet_market("RUGBY", leader_name, rugby_placed, session, config, executor)
+            except Exception as e:
+                print(f"[RUGBY] Error: {e}")
+            await asyncio.sleep(60)
+
+
+async def scan_cricket_loop(config: Config, executor: TradeExecutor):
+    print("[CRICKET] Scanner started — <=10 runs needed, 8+ wickets remaining")
+    async with aiohttp.ClientSession() as session:
+        while True:
+            try:
+                async with session.get(CRICKET_URL, timeout=aiohttp.ClientTimeout(total=10)) as r:
+                    data = await r.json()
+                for event in data.get("events", []):
+                    if event.get("status", {}).get("type", {}).get("name") != "STATUS_IN_PROGRESS":
+                        continue
+                    comp = event.get("competitions", [{}])[0]
+                    situation = comp.get("situation", {})
+                    runs_needed       = situation.get("runsNeeded")
+                    wickets_remaining = situation.get("wicketsRemaining")
+                    if runs_needed is None or wickets_remaining is None:
+                        continue
+                    if runs_needed <= 10 and wickets_remaining >= 8:
+                        batting = situation.get("battingTeam") or {}
+                        team_name = batting.get("displayName", "")
+                        if team_name:
+                            await find_and_bet_market("CRICKET", team_name, cricket_placed, session, config, executor)
+            except Exception as e:
+                print(f"[CRICKET] Error: {e}")
+            await asyncio.sleep(60)
+
+
+async def scan_golf_loop(config: Config, executor: TradeExecutor):
+    print("[GOLF] Scanner started — 8+ stroke lead, <=9 holes remaining")
+    async with aiohttp.ClientSession() as session:
+        while True:
+            try:
+                async with session.get(GOLF_URL, timeout=aiohttp.ClientTimeout(total=10)) as r:
+                    data = await r.json()
+                for event in data.get("events", []):
+                    if event.get("status", {}).get("type", {}).get("name") != "STATUS_IN_PROGRESS":
+                        continue
+                    comp = event.get("competitions", [{}])[0]
+                    scored = []
+                    for c in comp.get("competitors", []):
+                        raw_score = c.get("score", "0")
+                        try:
+                            score_val = 0 if raw_score in ("E", "--", "") else int(raw_score)
+                        except Exception:
+                            score_val = 0
+                        thru = c.get("status", {}).get("thru") or 0
+                        scored.append({
+                            "name":  c.get("athlete", {}).get("displayName", ""),
+                            "score": score_val,
+                            "thru":  int(thru),
+                        })
+                    if len(scored) < 2:
+                        continue
+                    scored.sort(key=lambda x: x["score"])
+                    lead = scored[1]["score"] - scored[0]["score"]
+                    holes_left = 18 - scored[0]["thru"]
+                    if lead >= 8 and 1 <= holes_left <= 9:
+                        await find_and_bet_market("GOLF", scored[0]["name"], golf_placed, session, config, executor)
+            except Exception as e:
+                print(f"[GOLF] Error: {e}")
+            await asyncio.sleep(120)
+
+
+async def scan_cs2_loop(config: Config, executor: TradeExecutor):
+    if not PANDASCORE_KEY:
+        print("[CS2] Skipping — set PANDASCORE_KEY to enable (free key at pandascore.co)")
+        return
+    print("[CS2] Scanner started — leading 11-1 at halftime (first to 13)")
+    async with aiohttp.ClientSession() as session:
+        while True:
+            try:
+                headers = {"Authorization": f"Bearer {PANDASCORE_KEY}"}
+                async with session.get("https://api.pandascore.co/csgo/matches/running",
+                                       headers=headers, params={"per_page": 50},
+                                       timeout=aiohttp.ClientTimeout(total=10)) as r:
+                    matches = await r.json()
+                for match in (matches if isinstance(matches, list) else []):
+                    for game in match.get("games", []):
+                        if game.get("status") != "running":
+                            continue
+                        teams = game.get("teams", [])
+                        if len(teams) < 2:
+                            continue
+                        t1_score = teams[0].get("score", 0) or 0
+                        t2_score = teams[1].get("score", 0) or 0
+                        if t1_score + t2_score != 12:
+                            continue
+                        lead = abs(t1_score - t2_score)
+                        if lead < 10:
+                            continue
+                        leader = teams[0] if t1_score > t2_score else teams[1]
+                        await find_and_bet_market("CS2", leader.get("name", ""), cs2_placed, session, config, executor)
+            except Exception as e:
+                print(f"[CS2] Error: {e}")
+            await asyncio.sleep(30)
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 async def main():
@@ -345,11 +581,20 @@ async def main():
     print(f"[BOT] Tennis T1: R16+, {TENNIS_T1_MIN_BETS}+ bets, ${TENNIS_T1_MIN_USD}+, 2-0 sets (safest)")
     print(f"[BOT] Tennis T2: R16+, {TENNIS_T2_MIN_BETS}+ bets, ${TENNIS_T2_MIN_USD}+, 1-0 sets + winning current 4-1")
     print(f"[BOT] Tennis T3: R16+, {TENNIS_T3_MIN_BETS}+ bets, ${TENNIS_T3_MIN_USD}+, winning current set by 3+")
-    print("[BOT] NBA: Q4, 10+ pt lead, <=8 min")
-    print("[BOT] NFL: Q4, 14+ pt lead, <=5 min")
-    print("[BOT] NHL: P3, 2+ goal lead, <=10 min")
-    print("[BOT] MLB: inn8+, 4+ run lead")
-    print("[BOT] Other: SKIPPED\n")
+    print("[BOT] NBA: Q4, 15+ pt lead, <=5 min  (~97.5%)")
+    print("[BOT] NFL: Q4, 21+ pt lead, <=3 min  (~97.5%)")
+    print("[BOT] NHL: P3, 3+ goal lead, <=5 min (~97.5%)")
+    print("[BOT] MLB: 9th inn+, 6+ run lead     (~97.5%)")
+    print("[BOT] Rugby:   20+ pt lead, 2nd half, 35+ min elapsed")
+    print("[BOT] Cricket: <=10 runs needed, 8+ wickets remaining")
+    print("[BOT] Golf:    8+ stroke lead, <=9 holes left")
+    print("[BOT] CS2:     leading 11-1 at halftime")
+    print("[BOT] Other markets: copy if 0.95 <= price < 0.97\n")
+
+    asyncio.create_task(scan_rugby_loop(config, executor))
+    asyncio.create_task(scan_cricket_loop(config, executor))
+    asyncio.create_task(scan_golf_loop(config, executor))
+    asyncio.create_task(scan_cs2_loop(config, executor))
 
     async for trade in feed.stream(TARGET_WALLET):
 
@@ -484,6 +729,9 @@ async def main():
                 if trade.price < 0.95:
                     print(f"[{sport.upper()}] Skip — price {trade.price:.2f} below 0.95 floor")
                     continue
+                if trade.price >= 0.97:
+                    print(f"[{sport.upper()}] Skip — price {trade.price:.2f} >= 0.97 (no profit)")
+                    continue
                 print(f"[{sport.upper()}] Top team = {top_team} — starting monitor")
                 monitoring.add(bet_key)
                 asyncio.create_task(
@@ -491,8 +739,22 @@ async def main():
                 )
             continue
 
-        # ── Unknown sport: skip ───────────────────────────────────────────
-        print(f"[SKIP] No strategy for: {trade.title[:60]}")
+        # ── All other markets: copy if 0.95 <= price < 0.97 ─────────────
+        if trade.price < 0.95:
+            print(f"[SKIP] Price {trade.price:.2f} below 0.95 floor: {trade.title[:60]}")
+            continue
+        if trade.price >= 0.97:
+            print(f"[SKIP] Price {trade.price:.2f} >= 0.97 (no profit): {trade.title[:60]}")
+            continue
+        print(f"\n[OTHER] RN1 @ {trade.price:.2f} — copying: {trade.title[:60]}")
+        signal = generator.process(trade)
+        if signal:
+            result = await executor.execute(signal)
+            if result.success:
+                lbl = "[SIM]" if result.is_simulated else "[LIVE]"
+                print(f"  {lbl} BET COPIED! {trade.outcome} | order_id={result.order_id}")
+            else:
+                print(f"  [ERROR] {result.error}")
 
 
 if __name__ == "__main__":
