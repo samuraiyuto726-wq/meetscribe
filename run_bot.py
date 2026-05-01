@@ -466,6 +466,7 @@ async def scan_rugby_loop(config: Config, executor: TradeExecutor):
     async with aiohttp.ClientSession() as session:
         while True:
             try:
+                print("[RUGBY] Checking live games...")
                 for url in RUGBY_URLS:
                     async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
                         data = await r.json()
@@ -484,10 +485,21 @@ async def scan_rugby_loop(config: Config, executor: TradeExecutor):
                         lead    = abs(home_score - away_score)
                         period  = status.get("period", 0)
                         elapsed = clock_minutes(status.get("displayClock", "0:00"))
-                        if period < 2 or elapsed < 35 or lead < 20:
+                        hn = home.get("team", {}).get("displayName", "")
+                        an = away.get("team", {}).get("displayName", "")
+                        print(f"[RUGBY] {an} vs {hn} | Half:{period} {elapsed:.0f}min | Lead:{lead}")
+                        if period < 2:
+                            print(f"[RUGBY]  -> Skip: not 2nd half yet")
+                            continue
+                        if elapsed < 35:
+                            print(f"[RUGBY]  -> Skip: only {elapsed:.0f} min elapsed (need 35+)")
+                            continue
+                        if lead < 20:
+                            print(f"[RUGBY]  -> Skip: lead {lead} (need 20+)")
                             continue
                         leader = home if home_score > away_score else away
                         leader_name = leader.get("team", {}).get("displayName", "")
+                        print(f"[RUGBY]  -> CONDITION MET! {leader_name} — searching market...")
                         await find_and_bet_market("RUGBY", leader_name, rugby_placed, session, config, executor)
             except Exception as e:
                 print(f"[RUGBY] Error: {e}")
@@ -499,22 +511,35 @@ async def scan_cricket_loop(config: Config, executor: TradeExecutor):
     async with aiohttp.ClientSession() as session:
         while True:
             try:
+                print("[CRICKET] Checking live games...")
                 async with session.get(CRICKET_URL, timeout=aiohttp.ClientTimeout(total=10)) as r:
                     data = await r.json()
+                live_found = False
                 for event in data.get("events", []):
                     if event.get("status", {}).get("type", {}).get("name") != "STATUS_IN_PROGRESS":
                         continue
+                    live_found = True
                     comp = event.get("competitions", [{}])[0]
                     situation = comp.get("situation", {})
                     runs_needed       = situation.get("runsNeeded")
                     wickets_remaining = situation.get("wicketsRemaining")
+                    batting = situation.get("battingTeam") or {}
+                    team_name = batting.get("displayName", "unknown")
+                    print(f"[CRICKET] {team_name} needs {runs_needed} runs | {wickets_remaining} wickets left")
                     if runs_needed is None or wickets_remaining is None:
+                        print(f"[CRICKET]  -> Skip: no situation data")
                         continue
-                    if runs_needed <= 10 and wickets_remaining >= 8:
-                        batting = situation.get("battingTeam") or {}
-                        team_name = batting.get("displayName", "")
-                        if team_name:
-                            await find_and_bet_market("CRICKET", team_name, cricket_placed, session, config, executor)
+                    if runs_needed > 10:
+                        print(f"[CRICKET]  -> Skip: {runs_needed} runs needed (need <=10)")
+                        continue
+                    if wickets_remaining < 8:
+                        print(f"[CRICKET]  -> Skip: {wickets_remaining} wickets left (need 8+)")
+                        continue
+                    print(f"[CRICKET]  -> CONDITION MET! {team_name} — searching market...")
+                    if team_name and team_name != "unknown":
+                        await find_and_bet_market("CRICKET", team_name, cricket_placed, session, config, executor)
+                if not live_found:
+                    print("[CRICKET] No live games")
             except Exception as e:
                 print(f"[CRICKET] Error: {e}")
             await asyncio.sleep(60)
@@ -525,11 +550,14 @@ async def scan_golf_loop(config: Config, executor: TradeExecutor):
     async with aiohttp.ClientSession() as session:
         while True:
             try:
+                print("[GOLF] Checking live tournaments...")
                 async with session.get(GOLF_URL, timeout=aiohttp.ClientTimeout(total=10)) as r:
                     data = await r.json()
+                live_found = False
                 for event in data.get("events", []):
                     if event.get("status", {}).get("type", {}).get("name") != "STATUS_IN_PROGRESS":
                         continue
+                    live_found = True
                     comp = event.get("competitions", [{}])[0]
                     scored = []
                     for c in comp.get("competitors", []):
@@ -549,8 +577,17 @@ async def scan_golf_loop(config: Config, executor: TradeExecutor):
                     scored.sort(key=lambda x: x["score"])
                     lead = scored[1]["score"] - scored[0]["score"]
                     holes_left = 18 - scored[0]["thru"]
-                    if lead >= 8 and 1 <= holes_left <= 9:
-                        await find_and_bet_market("GOLF", scored[0]["name"], golf_placed, session, config, executor)
+                    print(f"[GOLF] Leader: {scored[0]['name']} | Lead:{lead} strokes | {holes_left} holes left")
+                    if lead < 8:
+                        print(f"[GOLF]  -> Skip: lead {lead} (need 8+)")
+                        continue
+                    if not (1 <= holes_left <= 9):
+                        print(f"[GOLF]  -> Skip: {holes_left} holes left (need 1-9)")
+                        continue
+                    print(f"[GOLF]  -> CONDITION MET! {scored[0]['name']} — searching market...")
+                    await find_and_bet_market("GOLF", scored[0]["name"], golf_placed, session, config, executor)
+                if not live_found:
+                    print("[GOLF] No live tournaments")
             except Exception as e:
                 print(f"[GOLF] Error: {e}")
             await asyncio.sleep(120)
@@ -564,6 +601,7 @@ async def scan_cs2_loop(config: Config, executor: TradeExecutor):
     async with aiohttp.ClientSession() as session:
         while True:
             try:
+                print("[CS2] Checking live matches...")
                 headers = {"Authorization": f"Bearer {PANDASCORE_KEY}"}
                 async with session.get("https://api.pandascore.co/csgo/matches/running",
                                        headers=headers, params={"per_page": 50},
@@ -578,12 +616,17 @@ async def scan_cs2_loop(config: Config, executor: TradeExecutor):
                             continue
                         t1_score = teams[0].get("score", 0) or 0
                         t2_score = teams[1].get("score", 0) or 0
-                        if t1_score + t2_score != 12:
-                            continue
+                        total = t1_score + t2_score
                         lead = abs(t1_score - t2_score)
+                        print(f"[CS2] {teams[0].get('name','')} {t1_score}-{t2_score} {teams[1].get('name','')} | Rounds:{total}")
+                        if total != 12:
+                            print(f"[CS2]  -> Skip: not at halftime ({total} rounds)")
+                            continue
                         if lead < 10:
+                            print(f"[CS2]  -> Skip: lead {lead} (need 10+ for 11-1)")
                             continue
                         leader = teams[0] if t1_score > t2_score else teams[1]
+                        print(f"[CS2]  -> CONDITION MET! {leader.get('name','')} — searching market...")
                         await find_and_bet_market("CS2", leader.get("name", ""), cs2_placed, session, config, executor)
             except Exception as e:
                 print(f"[CS2] Error: {e}")
