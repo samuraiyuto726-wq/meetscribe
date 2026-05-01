@@ -74,10 +74,14 @@ RUGBY_URLS = [
 CRICKET_URL = "https://site.api.espn.com/apis/site/v2/sports/cricket/icc/scoreboard"
 GOLF_URL    = "https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard"
 
-rugby_placed   = set()
-cricket_placed = set()
-golf_placed    = set()
-cs2_placed     = set()
+rugby_placed      = set()
+cricket_placed    = set()
+golf_placed       = set()
+cs2_placed        = set()
+bball_indie       = set()
+football_indie    = set()
+hockey_indie      = set()
+baseball_indie    = set()
 
 BASKETBALL_URLS = [
     "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",
@@ -588,6 +592,123 @@ async def scan_cs2_loop(config: Config, executor: TradeExecutor):
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+async def _espn_games(session, urls):
+    games = []
+    for url in urls:
+        try:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
+                data = await r.json()
+            for event in data.get("events", []):
+                status = event.get("status", {})
+                comp = event.get("competitions", [{}])[0]
+                competitors = comp.get("competitors", [])
+                if len(competitors) < 2:
+                    continue
+                home = next((c for c in competitors if c.get("homeAway") == "home"), competitors[0])
+                away = next((c for c in competitors if c.get("homeAway") == "away"), competitors[1])
+                games.append({
+                    "status":     status.get("type", {}).get("name", ""),
+                    "period":     status.get("period", 0),
+                    "clock":      status.get("displayClock", "99:00"),
+                    "home_score": int(home.get("score", 0) or 0),
+                    "away_score": int(away.get("score", 0) or 0),
+                    "home_name":  home.get("team", {}).get("displayName", ""),
+                    "away_name":  away.get("team", {}).get("displayName", ""),
+                })
+        except Exception:
+            continue
+    return games
+
+
+async def scan_basketball_indie_loop(config: Config, executor: TradeExecutor):
+    urls = [
+        "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",
+        "https://site.api.espn.com/apis/site/v2/sports/basketball/euroleague/scoreboard",
+        "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard",
+        "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/scoreboard",
+    ]
+    print("[BBALL] Independent scanner started — Q4, 15+ pt lead, <=5 min (NBA/EuroLeague/NCAA/WNBA)")
+    async with aiohttp.ClientSession() as session:
+        while True:
+            try:
+                for g in await _espn_games(session, urls):
+                    if g["status"] != "STATUS_IN_PROGRESS": continue
+                    if g["period"] != 4: continue
+                    if clock_minutes(g["clock"]) > 5: continue
+                    lead = abs(g["home_score"] - g["away_score"])
+                    if lead < 15: continue
+                    leader = g["home_name"] if g["home_score"] > g["away_score"] else g["away_name"]
+                    await find_and_bet_market("BBALL", leader, bball_indie, session, config, executor)
+            except Exception as e:
+                print(f"[BBALL] Error: {e}")
+            await asyncio.sleep(30)
+
+
+async def scan_football_indie_loop(config: Config, executor: TradeExecutor):
+    urls = [
+        "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard",
+        "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard",
+    ]
+    print("[FOOTBALL] Independent scanner started — Q4, 21+ pt lead, <=3 min (NFL/NCAA)")
+    async with aiohttp.ClientSession() as session:
+        while True:
+            try:
+                for g in await _espn_games(session, urls):
+                    if g["status"] != "STATUS_IN_PROGRESS": continue
+                    if g["period"] != 4: continue
+                    if clock_minutes(g["clock"]) > 3: continue
+                    lead = abs(g["home_score"] - g["away_score"])
+                    if lead < 21: continue
+                    leader = g["home_name"] if g["home_score"] > g["away_score"] else g["away_name"]
+                    await find_and_bet_market("FOOTBALL", leader, football_indie, session, config, executor)
+            except Exception as e:
+                print(f"[FOOTBALL] Error: {e}")
+            await asyncio.sleep(30)
+
+
+async def scan_hockey_indie_loop(config: Config, executor: TradeExecutor):
+    urls = [
+        "https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard",
+        "https://site.api.espn.com/apis/site/v2/sports/hockey/college-hockey/scoreboard",
+    ]
+    print("[HOCKEY] Independent scanner started — P3, 3+ goal lead, <=5 min (NHL/college)")
+    async with aiohttp.ClientSession() as session:
+        while True:
+            try:
+                for g in await _espn_games(session, urls):
+                    if g["status"] != "STATUS_IN_PROGRESS": continue
+                    if g["period"] != 3: continue
+                    if clock_minutes(g["clock"]) > 5: continue
+                    lead = abs(g["home_score"] - g["away_score"])
+                    if lead < 3: continue
+                    leader = g["home_name"] if g["home_score"] > g["away_score"] else g["away_name"]
+                    await find_and_bet_market("HOCKEY", leader, hockey_indie, session, config, executor)
+            except Exception as e:
+                print(f"[HOCKEY] Error: {e}")
+            await asyncio.sleep(30)
+
+
+async def scan_baseball_indie_loop(config: Config, executor: TradeExecutor):
+    urls = [
+        "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard",
+        "https://site.api.espn.com/apis/site/v2/sports/baseball/college-baseball/scoreboard",
+    ]
+    print("[BASEBALL] Independent scanner started — 9th inn+, 6+ run lead (MLB/college)")
+    async with aiohttp.ClientSession() as session:
+        while True:
+            try:
+                for g in await _espn_games(session, urls):
+                    if g["status"] != "STATUS_IN_PROGRESS": continue
+                    if g["period"] < 9: continue
+                    lead = abs(g["home_score"] - g["away_score"])
+                    if lead < 6: continue
+                    leader = g["home_name"] if g["home_score"] > g["away_score"] else g["away_name"]
+                    await find_and_bet_market("BASEBALL", leader, baseball_indie, session, config, executor)
+            except Exception as e:
+                print(f"[BASEBALL] Error: {e}")
+            await asyncio.sleep(30)
+
+
 async def main():
     config    = Config()
     executor  = TradeExecutor(config)
@@ -613,6 +734,10 @@ async def main():
     asyncio.create_task(scan_cricket_loop(config, executor))
     asyncio.create_task(scan_golf_loop(config, executor))
     asyncio.create_task(scan_cs2_loop(config, executor))
+    asyncio.create_task(scan_basketball_indie_loop(config, executor))
+    asyncio.create_task(scan_football_indie_loop(config, executor))
+    asyncio.create_task(scan_hockey_indie_loop(config, executor))
+    asyncio.create_task(scan_baseball_indie_loop(config, executor))
 
     async for trade in feed.stream(TARGET_WALLET):
 
