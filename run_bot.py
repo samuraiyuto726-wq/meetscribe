@@ -47,10 +47,11 @@ TARGET_WALLET = "0x2005d16a84ceefa912d4e380cd32e7ff827875ea"  # RN1
 # max_mins = max minutes remaining (None = no clock needed e.g. MLB)
 # early_periods = periods to track RN1 bets before final period
 SPORT_CONDITIONS = {
-    "nba": {"period": 4, "min_lead": 15, "max_mins": 5,    "early_periods": (1,2,3)},
-    "nfl": {"period": 4, "min_lead": 21, "max_mins": 3,    "early_periods": (1,2,3)},
-    "nhl": {"period": 3, "min_lead": 3,  "max_mins": 5,    "early_periods": (1,2)},
-    "mlb": {"period": 9, "min_lead": 6,  "max_mins": None, "early_periods": tuple(range(1,9))},
+    "nba":        {"period": 4, "min_lead": 15, "max_mins": 5,    "early_periods": (1,2,3)},
+    "basketball": {"period": 4, "min_lead": 15, "max_mins": 5,    "early_periods": (1,2,3)},
+    "nfl":        {"period": 4, "min_lead": 21, "max_mins": 3,    "early_periods": (1,2,3)},
+    "nhl":        {"period": 3, "min_lead": 3,  "max_mins": 5,    "early_periods": (1,2)},
+    "mlb":        {"period": 9, "min_lead": 6,  "max_mins": None, "early_periods": tuple(range(1,9))},
 }
 
 TENNIS_T1_MIN_BETS = 4     # Tier 1: 2-0 sets won (safest)
@@ -77,6 +78,13 @@ rugby_placed   = set()
 cricket_placed = set()
 golf_placed    = set()
 cs2_placed     = set()
+
+BASKETBALL_URLS = [
+    "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",
+    "https://site.api.espn.com/apis/site/v2/sports/basketball/euroleague/scoreboard",
+    "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard",
+    "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/scoreboard",
+]
 
 ESPN_URLS = {
     "nba": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",
@@ -114,6 +122,11 @@ MLB_KEYWORDS = [
     "guardians", "twins", "white sox", "royals", "brewers", "pirates", "reds",
     "rockies", "diamondbacks", "orioles", "blue jays", "rays", "marlins",
 ]
+BASKETBALL_KEYWORDS = [
+    "euroleague", "eurocup", "ncaa", "wnba", "fiba", "nbl", "cba",
+    "basketball", "bball",
+]
+
 TENNIS_KEYWORDS = [
     "atp", "wta", "itf", "us open", "wimbledon", "french open",
     "australian open", "roland garros", "davis cup",
@@ -142,8 +155,9 @@ tennis_placed  = set()   # match_keys already bet on (avoid double-betting)
 
 def detect_sport(title: str) -> Optional[str]:
     tl = title.lower()
-    if any(k in tl for k in SOCCER_KEYWORDS): return "soccer"
-    if any(k in tl for k in NBA_KEYWORDS):    return "nba"
+    if any(k in tl for k in SOCCER_KEYWORDS):       return "soccer"
+    if any(k in tl for k in NBA_KEYWORDS):          return "nba"
+    if any(k in tl for k in BASKETBALL_KEYWORDS):   return "basketball"
     if any(k in tl for k in NFL_KEYWORDS):    return "nfl"
     if any(k in tl for k in NHL_KEYWORDS):    return "nhl"
     if any(k in tl for k in MLB_KEYWORDS):    return "mlb"
@@ -195,42 +209,46 @@ async def fetch_tennis_match(player: str) -> Optional[dict]:
 # ── ESPN API ──────────────────────────────────────────────────────────────────
 
 async def fetch_games(sport: str) -> list:
-    url = ESPN_URLS.get(sport)
-    if not url:
+    urls = BASKETBALL_URLS if sport == "basketball" else ([ESPN_URLS[sport]] if sport in ESPN_URLS else [])
+    if not urls:
         return []
+    all_games = []
     try:
         async with aiohttp.ClientSession() as sess:
-            async with sess.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                data = await resp.json()
-        games = []
-        for event in data.get("events", []):
-            comp        = event.get("competitions", [{}])[0]
-            competitors = comp.get("competitors", [])
-            status      = event.get("status", {})
-            if len(competitors) < 2:
-                continue
-            home = next((c for c in competitors if c.get("homeAway") == "home"), competitors[0])
-            away = next((c for c in competitors if c.get("homeAway") == "away"), competitors[1])
-            home_score = int(home.get("score", 0) or 0)
-            away_score = int(away.get("score", 0) or 0)
-            games.append({
-                "id":         event.get("id", ""),
-                "home":       home.get("team", {}).get("displayName", ""),
-                "home_short": home.get("team", {}).get("shortDisplayName", ""),
-                "away":       away.get("team", {}).get("displayName", ""),
-                "away_short": away.get("team", {}).get("shortDisplayName", ""),
-                "home_score": home_score,
-                "away_score": away_score,
-                "period":     status.get("period", 0),
-                "clock":      status.get("displayClock", "12:00"),
-                "status":     status.get("type", {}).get("name", ""),
-                "lead":       abs(home_score - away_score),
-                "leader":     home.get("team", {}).get("shortDisplayName", "")
-                              if home_score > away_score
-                              else away.get("team", {}).get("shortDisplayName", "")
-                              if away_score > home_score else "",
-            })
-        return games
+            for url in urls:
+                try:
+                    async with sess.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                        data = await resp.json()
+                except Exception:
+                    continue
+                for event in data.get("events", []):
+                    comp        = event.get("competitions", [{}])[0]
+                    competitors = comp.get("competitors", [])
+                    status      = event.get("status", {})
+                    if len(competitors) < 2:
+                        continue
+                    home = next((c for c in competitors if c.get("homeAway") == "home"), competitors[0])
+                    away = next((c for c in competitors if c.get("homeAway") == "away"), competitors[1])
+                    home_score = int(home.get("score", 0) or 0)
+                    away_score = int(away.get("score", 0) or 0)
+                    all_games.append({
+                        "id":         event.get("id", ""),
+                        "home":       home.get("team", {}).get("displayName", ""),
+                        "home_short": home.get("team", {}).get("shortDisplayName", ""),
+                        "away":       away.get("team", {}).get("displayName", ""),
+                        "away_short": away.get("team", {}).get("shortDisplayName", ""),
+                        "home_score": home_score,
+                        "away_score": away_score,
+                        "period":     status.get("period", 0),
+                        "clock":      status.get("displayClock", "12:00"),
+                        "status":     status.get("type", {}).get("name", ""),
+                        "lead":       abs(home_score - away_score),
+                        "leader":     home.get("team", {}).get("shortDisplayName", "")
+                                      if home_score > away_score
+                                      else away.get("team", {}).get("shortDisplayName", "")
+                                      if away_score > home_score else "",
+                    })
+        return all_games
     except Exception as exc:
         print(f"[{sport.upper()} API] Error: {exc}")
         return []
@@ -581,7 +599,7 @@ async def main():
     print(f"[BOT] Tennis T1: R16+, {TENNIS_T1_MIN_BETS}+ bets, ${TENNIS_T1_MIN_USD}+, 2-0 sets (safest)")
     print(f"[BOT] Tennis T2: R16+, {TENNIS_T2_MIN_BETS}+ bets, ${TENNIS_T2_MIN_USD}+, 1-0 sets + winning current 4-1")
     print(f"[BOT] Tennis T3: R16+, {TENNIS_T3_MIN_BETS}+ bets, ${TENNIS_T3_MIN_USD}+, winning current set by 3+")
-    print("[BOT] NBA: Q4, 15+ pt lead, <=5 min  (~97.5%)")
+    print("[BOT] NBA + Basketball (EuroLeague/NCAA/WNBA): Q4, 15+ pt lead, <=5 min (~97.5%)")
     print("[BOT] NFL: Q4, 21+ pt lead, <=3 min  (~97.5%)")
     print("[BOT] NHL: P3, 3+ goal lead, <=5 min (~97.5%)")
     print("[BOT] MLB: 9th inn+, 6+ run lead     (~97.5%)")
