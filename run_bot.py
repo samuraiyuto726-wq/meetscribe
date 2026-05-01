@@ -9,9 +9,31 @@ RN1 Copy Bot — Multi-Sport Strategy
 - MLB:     track inn1-7, bet inn8+ when top team leads 4+ runs
 - Other:   copy immediately
 """
-import asyncio, os, sys, time, json
+import asyncio, os, sys, time, json, csv
 from collections import defaultdict
 from typing import Optional
+from datetime import datetime
+
+LOG_FILE = r'C:\Users\glmar\meetscribe\bets_log.csv'
+
+def log_bet(sport: str, title: str, outcome: str, price: float,
+            amount_usd: float, simulated: bool, order_id: str):
+    payout       = round(amount_usd / price, 4)
+    profit_usd   = round(payout - amount_usd, 4)
+    profit_pct   = round((1 / price - 1) * 100, 2)
+    file_exists  = os.path.isfile(LOG_FILE)
+    with open(LOG_FILE, "a", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        if not file_exists:
+            w.writerow(["Timestamp","Sport","Market","Outcome","Price",
+                        "Bet USD","Potential Payout","Potential Profit USD",
+                        "Profit %","Simulated","Order ID"])
+        w.writerow([
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            sport, title[:80], outcome,
+            price, amount_usd, payout, profit_usd, f"{profit_pct}%",
+            "SIM" if simulated else "LIVE", order_id,
+        ])
 
 asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
@@ -363,6 +385,8 @@ async def monitor_and_bet(sport: str, game_id: str, team: str, trade: Trade,
             if result.success:
                 lbl = "[SIM]" if result.is_simulated else "[LIVE]"
                 print(f"  {lbl} Order placed! id={result.order_id}")
+                log_bet(label, trade.title, trade.outcome, trade.price,
+                        config.copy_amount_usd, result.is_simulated, result.order_id or "")
             else:
                 print(f"  [ERROR] {result.error}")
             break
@@ -451,6 +475,8 @@ async def find_and_bet_market(label: str, team_name: str, placed_set: set,
         if result.success:
             lbl = "[SIM]" if result.is_simulated else "[LIVE]"
             print(f"  {lbl} Bet placed! order_id={result.order_id}")
+            log_bet(label, synthetic.title, synthetic.outcome, ask,
+                    config.copy_amount_usd, result.is_simulated, result.order_id or "")
         else:
             print(f"  [ERROR] {result.error}")
         return True
@@ -915,6 +941,8 @@ async def main():
                     if result.success:
                         lbl = "[SIM]" if result.is_simulated else "[LIVE]"
                         print(f"  {lbl} BET COPIED! {trade.outcome} | order_id={result.order_id}")
+                        log_bet("TENNIS", trade.title, trade.outcome, trade.price,
+                                config.copy_amount_usd, result.is_simulated, result.order_id or "")
                     else:
                         print(f"  [ERROR] {result.error}")
             else:
@@ -988,6 +1016,8 @@ async def main():
             if result.success:
                 lbl = "[SIM]" if result.is_simulated else "[LIVE]"
                 print(f"  {lbl} BET COPIED! {trade.outcome} | order_id={result.order_id}")
+                log_bet("OTHER", trade.title, trade.outcome, trade.price,
+                        config.copy_amount_usd, result.is_simulated, result.order_id or "")
             else:
                 print(f"  [ERROR] {result.error}")
 
