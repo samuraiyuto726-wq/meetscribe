@@ -7,9 +7,39 @@ a team meets our high-confidence conditions (4%+ profit required).
 Sports: Basketball, Football, Hockey, Baseball, Rugby, Cricket, Golf, CS2
 """
 import asyncio, os, sys, time, json, csv
+from collections import defaultdict
 from datetime import datetime
 
-LOG_FILE = r'C:\Users\glmar\meetscribe\bets_log.csv'
+LOG_FILE   = r'C:\Users\glmar\meetscribe\bets_log.csv'
+_bot_start = datetime.now()
+
+stats = defaultdict(lambda: {
+    "conditions_met": 0,
+    "price_too_high":  0,
+    "price_too_low":   0,
+    "no_market":       0,
+    "bets_placed":     0,
+})
+
+
+def print_summary():
+    elapsed = datetime.now() - _bot_start
+    hours   = int(elapsed.total_seconds() // 3600)
+    mins    = int((elapsed.total_seconds() % 3600) // 60)
+    print(f"\n{'='*55}")
+    print(f"  BOT SESSION SUMMARY  (ran {hours}h {mins}m)")
+    print(f"{'='*55}")
+    total_cond = total_bets = 0
+    for sport, s in sorted(stats.items()):
+        total_cond += s["conditions_met"]
+        total_bets += s["bets_placed"]
+        print(f"  {sport:<10} | conditions met: {s['conditions_met']:>3} | "
+              f"bets: {s['bets_placed']:>2} | "
+              f"price too high: {s['price_too_high']:>2} | "
+              f"no market: {s['no_market']:>2}")
+    print(f"{'─'*55}")
+    print(f"  {'TOTAL':<10} | conditions met: {total_cond:>3} | bets: {total_bets:>2}")
+    print(f"{'='*55}\n")
 
 
 def log_bet(sport: str, title: str, outcome: str, price: float,
@@ -143,9 +173,11 @@ async def find_and_bet_market(label: str, team_name: str, placed_set: set,
 
         if ask >= 0.96:
             print(f"[{label}] Skip — price {ask:.2f} >= 0.96 (less than 4% profit)")
+            stats[label]["price_too_high"] += 1
             return False
         if ask < 0.85:
             print(f"[{label}] Skip — price {ask:.2f} < 0.85 (market too uncertain)")
+            stats[label]["price_too_low"] += 1
             return False
 
         placed_set.add(key)
@@ -169,11 +201,13 @@ async def find_and_bet_market(label: str, team_name: str, placed_set: set,
             print(f"  {lbl} Bet placed! order_id={result.order_id}")
             log_bet(label, synthetic.title, synthetic.outcome, ask,
                     config.copy_amount_usd, result.is_simulated, result.order_id or "", lead)
+            stats[label]["bets_placed"] += 1
         else:
             print(f"  [ERROR] {result.error}")
         return True
 
     print(f"[{label}] No suitable market found for '{team_name}'")
+    stats[label]["no_market"] += 1
     return False
 
 
@@ -247,6 +281,7 @@ async def scan_rugby_loop(config: Config, executor: TradeExecutor):
                         leader      = home if home_score > away_score else away
                         leader_name = leader.get("team", {}).get("displayName", "")
                         print(f"[RUGBY]  -> CONDITION MET! {leader_name} — searching market...")
+                        stats["RUGBY"]["conditions_met"] += 1
                         await find_and_bet_market("RUGBY", leader_name, rugby_placed, session, config, executor, lead)
             except Exception as e:
                 print(f"[RUGBY] Error: {e}")
@@ -282,6 +317,7 @@ async def scan_cricket_loop(config: Config, executor: TradeExecutor):
                         print(f"[CRICKET]  -> Skip: {wickets_remaining} wickets left (need 8+)")
                         continue
                     print(f"[CRICKET]  -> CONDITION MET! {team_name} — searching market...")
+                    stats["CRICKET"]["conditions_met"] += 1
                     if team_name and team_name != "unknown":
                         await find_and_bet_market("CRICKET", team_name, cricket_placed, session, config, executor, runs_needed)
                 if not live_found:
@@ -330,6 +366,7 @@ async def scan_golf_loop(config: Config, executor: TradeExecutor):
                         print(f"[GOLF]  -> Skip: {holes_left} holes left (need 1-9)")
                         continue
                     print(f"[GOLF]  -> CONDITION MET! {scored[0]['name']} — searching market...")
+                    stats["GOLF"]["conditions_met"] += 1
                     await find_and_bet_market("GOLF", scored[0]["name"], golf_placed, session, config, executor, lead)
                 if not live_found:
                     print("[GOLF] No live tournaments")
@@ -371,6 +408,7 @@ async def scan_cs2_loop(config: Config, executor: TradeExecutor):
                             continue
                         leader = teams[0] if t1_score > t2_score else teams[1]
                         print(f"[CS2]  -> CONDITION MET! {leader.get('name','')} — searching market...")
+                        stats["CS2"]["conditions_met"] += 1
                         await find_and_bet_market("CS2", leader.get("name", ""), cs2_placed, session, config, executor, lead)
             except Exception as e:
                 print(f"[CS2] Error: {e}")
@@ -407,6 +445,7 @@ async def scan_basketball_indie_loop(config: Config, executor: TradeExecutor):
                         continue
                     leader = g["home_name"] if g["home_score"] > g["away_score"] else g["away_name"]
                     print(f"[BBALL]  -> CONDITION MET! {leader} — searching market...")
+                    stats["BBALL"]["conditions_met"] += 1
                     await find_and_bet_market("BBALL", leader, bball_indie, session, config, executor, lead)
             except Exception as e:
                 print(f"[BBALL] Error: {e}")
@@ -441,6 +480,7 @@ async def scan_football_indie_loop(config: Config, executor: TradeExecutor):
                         continue
                     leader = g["home_name"] if g["home_score"] > g["away_score"] else g["away_name"]
                     print(f"[FOOTBALL]  -> CONDITION MET! {leader} — searching market...")
+                    stats["FOOTBALL"]["conditions_met"] += 1
                     await find_and_bet_market("FOOTBALL", leader, football_indie, session, config, executor, lead)
             except Exception as e:
                 print(f"[FOOTBALL] Error: {e}")
@@ -475,6 +515,7 @@ async def scan_hockey_indie_loop(config: Config, executor: TradeExecutor):
                         continue
                     leader = g["home_name"] if g["home_score"] > g["away_score"] else g["away_name"]
                     print(f"[HOCKEY]  -> CONDITION MET! {leader} — searching market...")
+                    stats["HOCKEY"]["conditions_met"] += 1
                     await find_and_bet_market("HOCKEY", leader, hockey_indie, session, config, executor, lead)
             except Exception as e:
                 print(f"[HOCKEY] Error: {e}")
@@ -505,6 +546,7 @@ async def scan_baseball_indie_loop(config: Config, executor: TradeExecutor):
                         continue
                     leader = g["home_name"] if g["home_score"] > g["away_score"] else g["away_name"]
                     print(f"[BASEBALL]  -> CONDITION MET! {leader} — searching market...")
+                    stats["BASEBALL"]["conditions_met"] += 1
                     await find_and_bet_market("BASEBALL", leader, baseball_indie, session, config, executor, lead)
             except Exception as e:
                 print(f"[BASEBALL] Error: {e}")
@@ -545,8 +587,16 @@ async def main():
             await asyncio.sleep(1)
     asyncio.create_task(heartbeat())
 
-    await asyncio.Event().wait()  # run forever
+    try:
+        await asyncio.Event().wait()  # run forever
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        pass
+    finally:
+        print_summary()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
