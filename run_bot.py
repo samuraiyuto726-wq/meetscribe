@@ -128,26 +128,46 @@ SPORT_CONDITIONS = {
     "BASEBALL":   {"period": 9, "min_lead": 6,  "max_mins": None},
 }
 
-# Search terms to find sports markets on Polymarket
+# Every team name searched directly on Polymarket — guarantees no market is missed
 SPORT_SEARCH_TERMS = {
-    "BASKETBALL": ["nba", "nba championship", "nba finals", "nba playoffs",
-                   "nba series", "win the series", "celtics", "thunder",
-                   "knicks", "timberwolves", "pacers", "heat", "nuggets"],
-    "FOOTBALL":   ["nfl", "super bowl", "nfl championship", "nfl playoffs"],
-    "HOCKEY":     ["nhl", "stanley cup", "nhl playoffs", "nhl series",
-                   "oilers", "panthers", "stars", "avalanche", "rangers"],
-    "BASEBALL":   ["mlb", "world series", "mlb championship", "yankees",
-                   "dodgers", "mets", "cubs", "braves", "astros"],
+    "BASKETBALL": [
+        "nba","nba finals","nba playoffs","nba championship","nba series",
+        "lakers","warriors","celtics","knicks","nets","heat","bulls","spurs","bucks",
+        "suns","clippers","nuggets","jazz","hawks","76ers","raptors","cavaliers",
+        "pistons","pacers","hornets","magic","wizards","grizzlies","pelicans",
+        "thunder","trail blazers","kings","timberwolves","mavericks","rockets",
+    ],
+    "FOOTBALL": [
+        "nfl","super bowl","nfl playoffs","nfl championship",
+        "patriots","cowboys","eagles","49ers","chiefs","bills","bengals","ravens",
+        "steelers","titans","colts","jaguars","texans","broncos","raiders",
+        "chargers","seahawks","rams","cardinals","falcons","saints","panthers",
+        "buccaneers","packers","bears","vikings","lions","giants","commanders","jets",
+    ],
+    "HOCKEY": [
+        "nhl","stanley cup","nhl playoffs","nhl series",
+        "bruins","maple leafs","canadiens","blackhawks","red wings","penguins",
+        "flyers","capitals","lightning","hurricanes","islanders","sabres","senators",
+        "canucks","flames","oilers","avalanche","blues","predators","wild","ducks",
+        "kings","sharks","golden knights","kraken","rangers",
+    ],
+    "BASEBALL": [
+        "mlb","world series","mlb playoffs",
+        "yankees","red sox","dodgers","cubs","braves","mets","phillies","padres",
+        "astros","rangers","angels","mariners","tigers","guardians","twins",
+        "white sox","royals","brewers","pirates","reds","rockies","diamondbacks",
+        "orioles","blue jays","rays","marlins",
+    ],
 }
 
-# Known team keywords — market must mention at least one to be counted as real
+# Team keywords for filtering — market must mention at least one
 SPORT_TEAM_KEYWORDS = {
     "BASKETBALL": [
         "lakers","warriors","celtics","knicks","nets","heat","bulls","spurs","bucks",
         "suns","clippers","nuggets","jazz","hawks","76ers","sixers","raptors",
         "cavaliers","cavs","pistons","pacers","hornets","magic","wizards",
         "grizzlies","pelicans","thunder","blazers","kings","timberwolves","wolves",
-        "mavericks","mavs","rockets","okc","nyk","bos","mia","ind","min",
+        "mavericks","mavs","rockets",
     ],
     "FOOTBALL": [
         "patriots","cowboys","eagles","49ers","chiefs","bills","bengals","ravens",
@@ -168,6 +188,11 @@ SPORT_TEAM_KEYWORDS = {
         "orioles","blue jays","rays","marlins",
     ],
 }
+
+# Market cache — refreshed every 5 minutes so we don't hammer the API every second
+_market_cache: dict = {sport: [] for sport in ["BASKETBALL","FOOTBALL","HOCKEY","BASEBALL"]}
+_cache_updated_at: float = 0.0
+CACHE_TTL = 300  # seconds
 
 RUGBY_URLS = [
     "https://site.api.espn.com/apis/site/v2/sports/rugby/international/scoreboard",
@@ -223,6 +248,41 @@ async def _espn_games(session, urls):
 
 
 # ── Polymarket helpers ────────────────────────────────────────────────────────
+
+async def refresh_market_cache(session) -> None:
+    """Search Polymarket for every team name to find ALL sports markets. Runs every 5 min."""
+    global _cache_updated_at
+    new_cache: dict = {sport: [] for sport in SPORT_SEARCH_TERMS}
+    for sport, search_terms in SPORT_SEARCH_TERMS.items():
+        seen_ids: set = set()
+        markets: list = []
+        team_kws = SPORT_TEAM_KEYWORDS.get(sport, [])
+        for term in search_terms:
+            try:
+                for m in await fetch_gamma_markets(session, term):
+                    mid = m.get("conditionId") or m.get("id", "")
+                    if not mid or mid in seen_ids:
+                        continue
+                    q = m.get("question", "").lower()
+                    if team_kws and not any(kw in q for kw in team_kws):
+                        continue
+                    seen_ids.add(mid)
+                    markets.append(m)
+            except Exception:
+                continue
+        new_cache[sport] = markets
+        stats[sport]["polymarket_markets"] = len(markets)
+    _market_cache.update(new_cache)
+    _cache_updated_at = time.time()
+    total = sum(len(v) for v in new_cache.values())
+    print(f"[POLY] Market cache refreshed — {total} real sports markets found")
+    for sport, markets in new_cache.items():
+        if markets:
+            sample = [m.get("question", "")[:55] for m in markets[:3]]
+            print(f"  [{sport}] {len(markets)} markets: {sample}")
+        else:
+            print(f"  [{sport}] 0 markets")
+
 
 async def fetch_gamma_markets(session, query: str) -> list:
     try:
@@ -281,36 +341,16 @@ async def scan_polymarket_games_loop(config: Config, executor: TradeExecutor):
     placed = set()   # market conditionId:leader — prevent double bets
 
     async with aiohttp.ClientSession() as session:
+        # Refresh cache immediately on startup
+        await refresh_market_cache(session)
+
         while True:
             try:
-                # ── Step 1: Fetch Polymarket markets per sport ────────────
-                sport_markets: dict[str, list] = {}
-                for sport, terms in SPORT_SEARCH_TERMS.items():
-                    seen_ids: set  = set()
-                    markets: list  = []
-                    team_kws       = SPORT_TEAM_KEYWORDS.get(sport, [])
-                    for term in terms:
-                        for m in await fetch_gamma_markets(session, term):
-                            mid = m.get("conditionId") or m.get("id", "")
-                            if not mid or mid in seen_ids:
-                                continue
-                            # only keep markets that mention a real team name
-                            q = m.get("question", "").lower()
-                            if team_kws and not any(kw in q for kw in team_kws):
-                                continue
-                            seen_ids.add(mid)
-                            markets.append(m)
-                    sport_markets[sport] = markets
-                    stats[sport]["polymarket_markets"] = len(markets)
+                # ── Step 1: Refresh market cache every 5 minutes ─────────
+                if time.time() - _cache_updated_at > CACHE_TTL:
+                    await refresh_market_cache(session)
 
-                total_markets = sum(len(v) for v in sport_markets.values())
-                print(f"[POLY] {total_markets} real sports markets on Polymarket")
-                for sport, markets in sport_markets.items():
-                    if markets:
-                        sample = [m.get('question','')[:60] for m in markets[:3]]
-                        print(f"  [{sport}] {len(markets)} markets — {sample}")
-                    else:
-                        print(f"  [{sport}] 0 markets")
+                sport_markets = _market_cache
 
                 # ── Step 2: Fetch live ESPN games per sport ───────────────
                 sport_games: dict[str, list] = {}
@@ -319,9 +359,9 @@ async def scan_polymarket_games_loop(config: Config, executor: TradeExecutor):
                     live = [g for g in all_games if g["status"] == "STATUS_IN_PROGRESS"]
                     sport_games[sport] = live
                     if live:
-                        print(f"  [{sport}] {len(live)} live games — e.g.: {live[0]['away_name']} vs {live[0]['home_name']}")
+                        print(f"  [{sport}] {len(live)} live: {live[0]['away_name']} vs {live[0]['home_name']}")
                     else:
-                        print(f"  [{sport}] No live games right now")
+                        print(f"  [{sport}] No live games")
 
                 # ── Step 3: Match markets → games → check conditions ──────
                 for sport, markets in sport_markets.items():
