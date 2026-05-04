@@ -30,22 +30,21 @@ def print_summary():
     elapsed = datetime.now() - _bot_start
     hours   = int(elapsed.total_seconds() // 3600)
     mins    = int((elapsed.total_seconds() % 3600) // 60)
-    print(f"\n{'='*65}")
+    print(f"\n{'='*55}")
     print(f"  BOT SESSION SUMMARY  (ran {hours}h {mins}m)")
-    print(f"{'='*65}")
-    total_markets = total_cond = total_bets = 0
+    print(f"{'='*55}")
+    total_cond = total_bets = 0
     for sport in ALL_SPORTS:
         s = stats[sport]
-        total_markets += s["polymarket_markets"]
-        total_cond    += s["conditions_met"]
-        total_bets    += s["bets_placed"]
-        print(f"  {sport:<12} | markets on poly: {s['polymarket_markets']:>3} | "
-              f"conditions met: {s['conditions_met']:>3} | "
-              f"price skip: {s['price_too_high']:>2} high / {s['price_too_low']:>2} low | "
+        total_cond += s["conditions_met"]
+        total_bets += s["bets_placed"]
+        print(f"  {sport:<12} | conditions met: {s['conditions_met']:>3} | "
+              f"price too high: {s['price_too_high']:>2} | "
+              f"price too low: {s['price_too_low']:>2} | "
               f"bets: {s['bets_placed']:>2}")
-    print(f"{'─'*65}")
-    print(f"  {'TOTAL':<12} | markets: {total_markets:>3} | conditions met: {total_cond:>3} | bets: {total_bets:>2}")
-    print(f"{'='*65}\n")
+    print(f"{'─'*55}")
+    print(f"  {'TOTAL':<12} | conditions met: {total_cond:>3} | bets: {total_bets:>2}")
+    print(f"{'='*55}\n")
 
 
 def log_bet(sport, title, outcome, price, amount_usd, simulated, order_id, lead="-"):
