@@ -130,19 +130,24 @@ SPORT_CONDITIONS = {
 
 # Search terms to find sports markets on Polymarket
 SPORT_SEARCH_TERMS = {
-    "BASKETBALL": ["nba", "nba championship", "nba finals"],
-    "FOOTBALL":   ["nfl", "super bowl", "nfl championship"],
-    "HOCKEY":     ["nhl", "stanley cup"],
-    "BASEBALL":   ["mlb", "world series"],
+    "BASKETBALL": ["nba", "nba championship", "nba finals", "nba playoffs",
+                   "nba series", "win the series", "celtics", "thunder",
+                   "knicks", "timberwolves", "pacers", "heat", "nuggets"],
+    "FOOTBALL":   ["nfl", "super bowl", "nfl championship", "nfl playoffs"],
+    "HOCKEY":     ["nhl", "stanley cup", "nhl playoffs", "nhl series",
+                   "oilers", "panthers", "stars", "avalanche", "rangers"],
+    "BASEBALL":   ["mlb", "world series", "mlb championship", "yankees",
+                   "dodgers", "mets", "cubs", "braves", "astros"],
 }
 
 # Known team keywords — market must mention at least one to be counted as real
 SPORT_TEAM_KEYWORDS = {
     "BASKETBALL": [
         "lakers","warriors","celtics","knicks","nets","heat","bulls","spurs","bucks",
-        "suns","clippers","nuggets","jazz","hawks","76ers","raptors","cavaliers",
-        "pistons","pacers","hornets","magic","wizards","grizzlies","pelicans",
-        "thunder","blazers","kings","timberwolves","mavericks","rockets",
+        "suns","clippers","nuggets","jazz","hawks","76ers","sixers","raptors",
+        "cavaliers","cavs","pistons","pacers","hornets","magic","wizards",
+        "grizzlies","pelicans","thunder","blazers","kings","timberwolves","wolves",
+        "mavericks","mavs","rockets","okc","nyk","bos","mia","ind","min",
     ],
     "FOOTBALL": [
         "patriots","cowboys","eagles","49ers","chiefs","bills","bengals","ravens",
