@@ -193,7 +193,7 @@ async def _espn_games(session, urls):
 
 async def fetch_gamma_markets(session, query: str) -> list:
     try:
-        params = {"q": query, "active": "true", "closed": "false", "limit": 50}
+        params = {"q": query, "active": "true", "closed": "false", "limit": 200}
         async with session.get(f"{GAMMA_API}/markets", params=params,
                                timeout=aiohttp.ClientTimeout(total=10)) as r:
             raw = await r.json()
@@ -266,23 +266,30 @@ async def scan_polymarket_games_loop(config: Config, executor: TradeExecutor):
 
                 total_markets = sum(len(v) for v in sport_markets.values())
                 print(f"[POLY] {total_markets} active sports markets found on Polymarket")
+                for sport, markets in sport_markets.items():
+                    if markets:
+                        print(f"  [{sport}] {len(markets)} markets — e.g.: {markets[0].get('question','')[:70]}")
 
                 # ── Step 2: Fetch live ESPN games per sport ───────────────
                 sport_games: dict[str, list] = {}
                 for sport, urls in SPORT_ESPN_URLS.items():
                     all_games = await _espn_games(session, urls)
-                    sport_games[sport] = [g for g in all_games if g["status"] == "STATUS_IN_PROGRESS"]
+                    live = [g for g in all_games if g["status"] == "STATUS_IN_PROGRESS"]
+                    sport_games[sport] = live
+                    if live:
+                        print(f"  [{sport}] {len(live)} live games — e.g.: {live[0]['away_name']} vs {live[0]['home_name']}")
+                    else:
+                        print(f"  [{sport}] No live games right now")
 
                 # ── Step 3: Match markets → games → check conditions ──────
                 for sport, markets in sport_markets.items():
-                    cond      = SPORT_CONDITIONS[sport]
+                    cond       = SPORT_CONDITIONS[sport]
                     live_games = sport_games.get(sport, [])
 
                     if not markets:
                         print(f"[{sport}] No active Polymarket markets")
                         continue
                     if not live_games:
-                        print(f"[{sport}] No live games right now")
                         continue
 
                     for market in markets:
