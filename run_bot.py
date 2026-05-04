@@ -130,10 +130,38 @@ SPORT_CONDITIONS = {
 
 # Search terms to find sports markets on Polymarket
 SPORT_SEARCH_TERMS = {
-    "BASKETBALL": ["nba", "basketball", "nba championship", "nba finals"],
-    "FOOTBALL":   ["nfl", "super bowl", "football"],
-    "HOCKEY":     ["nhl", "stanley cup", "hockey"],
-    "BASEBALL":   ["mlb", "world series", "baseball"],
+    "BASKETBALL": ["nba", "nba championship", "nba finals"],
+    "FOOTBALL":   ["nfl", "super bowl", "nfl championship"],
+    "HOCKEY":     ["nhl", "stanley cup"],
+    "BASEBALL":   ["mlb", "world series"],
+}
+
+# Known team keywords — market must mention at least one to be counted as real
+SPORT_TEAM_KEYWORDS = {
+    "BASKETBALL": [
+        "lakers","warriors","celtics","knicks","nets","heat","bulls","spurs","bucks",
+        "suns","clippers","nuggets","jazz","hawks","76ers","raptors","cavaliers",
+        "pistons","pacers","hornets","magic","wizards","grizzlies","pelicans",
+        "thunder","blazers","kings","timberwolves","mavericks","rockets",
+    ],
+    "FOOTBALL": [
+        "patriots","cowboys","eagles","49ers","chiefs","bills","bengals","ravens",
+        "steelers","titans","colts","jaguars","texans","broncos","raiders",
+        "chargers","seahawks","rams","cardinals","falcons","saints","panthers",
+        "buccaneers","packers","bears","vikings","lions","giants","commanders","jets",
+    ],
+    "HOCKEY": [
+        "bruins","maple leafs","canadiens","blackhawks","red wings","penguins",
+        "flyers","capitals","lightning","hurricanes","islanders","sabres","senators",
+        "canucks","flames","oilers","avalanche","blues","predators","wild","ducks",
+        "kings","sharks","golden knights","kraken","rangers",
+    ],
+    "BASEBALL": [
+        "yankees","red sox","dodgers","cubs","braves","mets","phillies","padres",
+        "astros","rangers","angels","mariners","tigers","guardians","twins",
+        "white sox","royals","brewers","pirates","reds","rockies","diamondbacks",
+        "orioles","blue jays","rays","marlins",
+    ],
 }
 
 RUGBY_URLS = [
@@ -253,22 +281,31 @@ async def scan_polymarket_games_loop(config: Config, executor: TradeExecutor):
                 # ── Step 1: Fetch Polymarket markets per sport ────────────
                 sport_markets: dict[str, list] = {}
                 for sport, terms in SPORT_SEARCH_TERMS.items():
-                    seen_ids: set = set()
-                    markets: list = []
+                    seen_ids: set  = set()
+                    markets: list  = []
+                    team_kws       = SPORT_TEAM_KEYWORDS.get(sport, [])
                     for term in terms:
                         for m in await fetch_gamma_markets(session, term):
                             mid = m.get("conditionId") or m.get("id", "")
-                            if mid and mid not in seen_ids:
-                                seen_ids.add(mid)
-                                markets.append(m)
+                            if not mid or mid in seen_ids:
+                                continue
+                            # only keep markets that mention a real team name
+                            q = m.get("question", "").lower()
+                            if team_kws and not any(kw in q for kw in team_kws):
+                                continue
+                            seen_ids.add(mid)
+                            markets.append(m)
                     sport_markets[sport] = markets
                     stats[sport]["polymarket_markets"] = len(markets)
 
                 total_markets = sum(len(v) for v in sport_markets.values())
-                print(f"[POLY] {total_markets} active sports markets found on Polymarket")
+                print(f"[POLY] {total_markets} real sports markets on Polymarket")
                 for sport, markets in sport_markets.items():
                     if markets:
-                        print(f"  [{sport}] {len(markets)} markets — e.g.: {markets[0].get('question','')[:70]}")
+                        sample = [m.get('question','')[:60] for m in markets[:3]]
+                        print(f"  [{sport}] {len(markets)} markets — {sample}")
+                    else:
+                        print(f"  [{sport}] 0 markets")
 
                 # ── Step 2: Fetch live ESPN games per sport ───────────────
                 sport_games: dict[str, list] = {}
